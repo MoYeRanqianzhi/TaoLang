@@ -1,0 +1,70 @@
+// ============================================================================
+// types.tao -- 内置类型与运算符
+// ============================================================================
+// 验证点：
+//   - 内置类型字面量：int, float, bool, str, tuple
+//   - 算术运算符：+, -, *, /, **
+//   - 比较运算符：==, !=, <, >, <=, >=
+//   - 逻辑运算符：&&, ||, !
+//   - 运算符优先级
+//   - 类型推断正确性
+// ============================================================================
+
+fn main {
+    // -- 整数 --
+    let a: int = 42
+    let b: int = -17
+    let big = 1000000
+
+    // -- 浮点数 --
+    let pi: float = 3.14159
+    let negative_float = -2.718
+    let small = 0.001
+
+    // -- 布尔值 --
+    let yes: bool = true
+    let no: bool = false
+
+    // -- 字符串 --
+    let hello: str = "Hello, World!"
+    let empty_str = ""
+    let escaped = "line1\nline2\ttab"
+
+    // -- 元组 --
+    let point = (10, 20)
+    let rgb = (255, 128, 0)
+    let mixed = (42, "hello", true)
+
+    // -- 算术运算 --
+    let sum = a + b           // 25
+    let diff = a - b          // 59
+    let product = a * b       // -714
+    let quotient = a / b      // -2（整数除法）
+    let power = 2 ** 10       // 1024
+
+    // -- 浮点运算 --
+    let f_sum = pi + negative_float
+    let f_product = pi * 2.0
+
+    // -- 比较运算 --
+    let eq = (a == 42)        // true
+    let neq = (a != b)        // true
+    let lt = (b < a)          // true
+    let gt = (a > b)          // true
+    let lte = (a <= 42)       // true
+    let gte = (a >= 42)       // true
+
+    // -- 逻辑运算 --
+    let and_result = yes && no      // false
+    let or_result = yes || no       // true
+    let not_result = !yes           // false
+
+    // -- 复合表达式（运算符优先级） --
+    let complex = 2 + 3 * 4         // 14（乘法优先）
+    let grouped = (2 + 3) * 4       // 20（括号优先）
+    let chained = a > 0 && b < 0    // true
+
+    // -- 输出验证 --
+    println($"sum = {sum}, power = {power}")
+    println($"eq = {eq}, chained = {chained}")
+}

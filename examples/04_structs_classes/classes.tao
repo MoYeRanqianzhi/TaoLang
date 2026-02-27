@@ -1,0 +1,95 @@
+// ============================================================================
+// classes.tao -- 类定义、构造、方法
+// ============================================================================
+// 验证点：
+//   - class 定义
+//   - 构造函数参数
+//   - 成员变量（let）
+//   - 方法定义与 self 引用
+//   - 空类
+// ============================================================================
+
+// -- 空类（合法） --
+class Empty
+
+// -- 基本类 --
+class Counter {
+    let value: int = 0
+
+    fn increment() {
+        self.value = self.value + 1
+    }
+
+    fn decrement() {
+        self.value = self.value - 1
+    }
+
+    fn get() -> int {
+        self.value
+    }
+
+    fn reset() {
+        self.value = 0
+    }
+}
+
+// -- 带构造函数参数的类 --
+class Person(name: str, age: int) {
+    let name: str = name
+    let age: int = age
+
+    fn greet() {
+        println($"Hi, I'm {self.name}, {self.age} years old.")
+    }
+
+    fn birthday() {
+        self.age = self.age + 1
+        println($"{self.name} is now {self.age}!")
+    }
+}
+
+// -- 带默认值和计算属性的类 --
+class Circle(radius: float) {
+    let radius: float = radius
+
+    fn area() -> float {
+        3.14159 * self.radius * self.radius
+    }
+
+    fn circumference() -> float {
+        2.0 * 3.14159 * self.radius
+    }
+
+    fn scale(factor: float) {
+        self.radius = self.radius * factor
+    }
+}
+
+fn main {
+    // -- 空类实例化 --
+    let e = Empty()
+
+    // -- Counter --
+    let c = Counter()
+    c.increment()
+    c.increment()
+    c.increment()
+    println($"Counter: {c.get()}")   // 3
+    c.decrement()
+    println($"Counter: {c.get()}")   // 2
+    c.reset()
+    println($"Counter: {c.get()}")   // 0
+
+    // -- Person --
+    let alice = Person("Alice", 30)
+    alice.greet()
+    alice.birthday()
+
+    // -- Circle --
+    let circle = Circle(5.0)
+    println($"Area: {circle.area()}")
+    println($"Circumference: {circle.circumference()}")
+    circle.scale(2.0)
+    println($"Scaled radius: {circle.radius}")
+    println($"Scaled area: {circle.area()}")
+}

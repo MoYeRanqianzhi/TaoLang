@@ -1,0 +1,65 @@
+// ============================================================================
+// metadata.tao -- of 属性查询与 set...to
+// ============================================================================
+// 验证点：
+//   - x of type：获取类型
+//   - x of symbol：获取变量名
+//   - x of space：获取所属空间
+//   - x of alive[auto]：获取生命周期属性
+//   - set...to：设置属性值
+//   - set...[self] ->：追加钩子绑定
+//   - is 类型检查
+// ============================================================================
+
+space data_room {
+    let value = 42
+}
+
+fn main {
+    // -- of 属性查询 --
+    println("=== Metadata queries ===")
+    let x = 42
+    println($"x of type   = {x of type}")      // int
+    println($"x of symbol = {x of symbol}")     // x
+
+    let name = "TaoLang"
+    println($"name of type   = {name of type}")     // str
+    println($"name of symbol = {name of symbol}")   // name
+
+    // -- 空间内变量的元数据 --
+    using data_room {
+        println($"value of space = {value of space}")   // data_room
+    }
+
+    // -- is 类型检查 --
+    println("\n=== Type checking ===")
+    let a = 100
+    let b = "hello"
+    let c = true
+
+    println($"a is int:   {a is int}")     // true
+    println($"b is str:   {b is str}")     // true
+    println($"c is bool:  {c is bool}")    // true
+    println($"a is str:   {a is str}")     // false
+
+    // -- set...to 设置属性 --
+    println("\n=== set...to ===")
+    let managed = 0
+    set managed of alive[auto] to false   // 关闭自动生命周期管理
+
+    // -- set 追加钩子（语法糖形式） --
+    println("\n=== set hooks ===")
+    let observable = 0
+    set observable on modify { println($"observable changed to: {self}") }
+
+    observable = 10   // 触发：observable changed to: 10
+    observable = 20   // 触发：observable changed to: 20
+
+    // -- set 追加钩子（完整形式） --
+    let tracked = ""
+    set tracked [self] -> on modify { println($"tracked: '{self}'") }
+                          on use { println($"tracked read: '{self}'") }
+
+    tracked = "hello"
+    let snap = tracked
+}

@@ -1,0 +1,74 @@
+// ============================================================================
+// when_hooks.tao -- when 钩子（主动拦截）
+// ============================================================================
+// 验证点：
+//   - when modify：拦截赋值，it 携带新值，self 为旧值
+//   - when create：拦截创建，it 携带类型信息
+//   - it 参数与 new_val -> 自定义名称
+//   - when use：拦截读取（不传递 it）
+//   - pass 阻止默认行为
+//   - 自定义验证逻辑
+// ============================================================================
+
+fn main {
+    // -- when modify：值验证（拒绝负数） --
+    let positive_only = 10
+        [self] ->
+        when modify { it ->
+            if (it < 0) {
+                println($"Rejected: {it} is negative")
+                pass   // 阻止赋值
+            } else {
+                self = it
+            }
+        }
+
+    positive_only = 20    // 成功：self 变为 20
+    positive_only = -5    // 拒绝：保持 20
+    positive_only = 30    // 成功：self 变为 30
+    println($"positive_only = {positive_only}")   // 30
+
+    // -- when modify：自定义参数名 --
+    let clamped = 50
+        [self] ->
+        when modify { new_val ->
+            if (new_val > 100) {
+                self = 100
+            } else if (new_val < 0) {
+                self = 0
+            } else {
+                self = new_val
+            }
+        }
+
+    clamped = 150    // 被钳制为 100
+    clamped = -20    // 被钳制为 0
+    clamped = 75     // 正常赋值
+    println($"clamped = {clamped}")   // 75
+
+    // -- when use：自定义读取行为 --
+    let access_count = 0
+    let guarded = "secret"
+        [self] ->
+        when use {
+            access_count = access_count + 1
+            println($"Access #{access_count}")
+            self   // 返回当前值
+        }
+
+    let a = guarded   // Access #1
+    let b = guarded   // Access #2
+    println($"Accessed {access_count} times")
+
+    // -- when modify：日志记录 --
+    let logged = 0
+        [self] ->
+        when modify { it ->
+            println($"[LOG] {self} -> {it}")
+            self = it
+        }
+
+    logged = 10   // [LOG] 0 -> 10
+    logged = 20   // [LOG] 10 -> 20
+    logged = 30   // [LOG] 20 -> 30
+}

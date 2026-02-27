@@ -1,0 +1,75 @@
+// ============================================================================
+// structs.tao -- 结构体定义与使用
+// ============================================================================
+// 验证点：
+//   - struct 定义
+//   - 结构体实例化
+//   - 字段访问
+//   - 嵌套结构体
+//   - 关联函数（fn StructName.method）
+// ============================================================================
+
+// -- 基本结构体 --
+struct Point {
+    x: float,
+    y: float
+}
+
+// -- 嵌套结构体 --
+struct Rect {
+    origin: Point,
+    width: float,
+    height: float
+}
+
+// -- 关联函数：构造器 --
+fn Point.new(x: float, y: float) -> Point {
+    Point { x: x, y: y }
+}
+
+// -- 关联函数：实例方法（通过 self 访问） --
+fn Point.distance_to(other: Point) -> float {
+    let dx = self.x - other.x
+    let dy = self.y - other.y
+    sqrt(dx * dx + dy * dy)
+}
+
+fn Point.to_string() -> str {
+    $"({self.x}, {self.y})"
+}
+
+// -- Rect 关联函数 --
+fn Rect.area() -> float {
+    self.width * self.height
+}
+
+fn Rect.contains(p: Point) -> bool {
+    p.x >= self.origin.x &&
+    p.x <= self.origin.x + self.width &&
+    p.y >= self.origin.y &&
+    p.y <= self.origin.y + self.height
+}
+
+fn main {
+    // -- 结构体实例化 --
+    let p1 = Point { x: 3.0, y: 4.0 }
+    let p2 = Point.new(6.0, 8.0)
+
+    // -- 字段访问 --
+    println($"p1 = {p1.to_string()}")
+    println($"p2 = ({p2.x}, {p2.y})")
+
+    // -- 关联函数调用 --
+    let dist = p1.distance_to(p2)
+    println($"Distance: {dist}")
+
+    // -- 嵌套结构体 --
+    let rect = Rect {
+        origin: Point { x: 0.0, y: 0.0 },
+        width: 10.0,
+        height: 5.0
+    }
+    println($"Area: {rect.area()}")
+    println($"Contains p1: {rect.contains(p1)}")
+    println($"Contains (20, 20): {rect.contains(Point { x: 20.0, y: 20.0 })}")
+}

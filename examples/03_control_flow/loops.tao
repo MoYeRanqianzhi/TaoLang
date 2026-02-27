@@ -1,0 +1,56 @@
+// ============================================================================
+// loops.tao -- 循环结构
+// ============================================================================
+// 验证点：
+//   - while 循环
+//   - for x in 迭代
+//   - do loop 定时循环
+//   - 循环中的变量修改
+//   - 嵌套循环
+// ============================================================================
+
+fn main {
+    // -- while 循环：基本计数 --
+    let i = 0
+    let sum = 0
+    while (i < 10) {
+        sum = sum + i
+        i = i + 1
+    }
+    println($"sum(0..9) = {sum}")   // 45
+
+    // -- while 循环：条件退出 --
+    let n = 1
+    while (n < 1000) {
+        n = n * 2
+    }
+    println($"First power of 2 >= 1000: {n}")   // 1024
+
+    // -- for x in 迭代 --
+    let total = 0
+    for x in [1, 2, 3, 4, 5] {
+        total = total + x
+    }
+    println($"sum of [1..5] = {total}")   // 15
+
+    // -- for 迭代字符串 --
+    for ch in "TaoLang" {
+        println($"char: {ch}")
+    }
+
+    // -- 嵌套循环 --
+    let row = 0
+    while (row < 3) {
+        let col = 0
+        while (col < 3) {
+            println($"({row}, {col})")
+            col = col + 1
+        }
+        row = row + 1
+    }
+
+    // -- do loop 定时循环（执行 3 次，间隔 100ms） --
+    do loop(3, sep=100) {
+        println("tick")
+    }
+}

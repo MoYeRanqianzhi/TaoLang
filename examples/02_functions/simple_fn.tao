@@ -1,0 +1,80 @@
+// ============================================================================
+// simple_fn.tao -- 基本函数定义与调用
+// ============================================================================
+// 验证点：
+//   - 无参函数
+//   - 有参函数与返回值类型
+//   - 隐式返回（最后一个表达式）
+//   - 显式 return
+//   - 函数重载（同名不同参数）
+//   - void 返回类型
+// ============================================================================
+
+// -- 无参函数 --
+fn get_magic_number() -> int {
+    42
+}
+
+// -- 有参函数，显式返回 --
+fn add(a: int, b: int) -> int {
+    return a + b
+}
+
+// -- 隐式返回（最后一个表达式作为返回值） --
+fn multiply(a: int, b: int) -> int {
+    a * b
+}
+
+// -- 多参数，混合类型 --
+fn format_greeting(name: str, age: int) -> str {
+    $"Hello, {name}! You are {age} years old."
+}
+
+// -- void 返回类型（无返回值） --
+fn print_separator() {
+    println("========================")
+}
+
+// -- 函数重载：同名函数，不同参数类型 --
+fn describe(value: int) {
+    println($"Integer: {value}")
+}
+
+fn describe(value: str) {
+    println($"String: {value}")
+}
+
+fn describe(value: float) {
+    println($"Float: {value}")
+}
+
+// -- 多返回路径 --
+fn abs(x: int) -> int {
+    if (x < 0) { return -x }
+    x
+}
+
+fn main {
+    let magic = get_magic_number()
+    println($"Magic number: {magic}")
+
+    let sum = add(10, 20)
+    println($"10 + 20 = {sum}")
+
+    let product = multiply(6, 7)
+    println($"6 * 7 = {product}")
+
+    let greeting = format_greeting("Alice", 30)
+    println(greeting)
+
+    print_separator()
+
+    // -- 函数重载调用 --
+    describe(42)
+    describe("hello")
+    describe(3.14)
+
+    // -- abs 测试 --
+    println($"abs(-5) = {abs(-5)}")
+    println($"abs(3) = {abs(3)}")
+}

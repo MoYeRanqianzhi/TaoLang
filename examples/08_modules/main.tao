@@ -1,0 +1,36 @@
+// ============================================================================
+// main.tao -- 模块导入主文件
+// ============================================================================
+// 验证点：
+//   - from...import 语法
+//   - 导入本地模块（native 来源）
+//   - 导入标准库（res 来源）
+//   - 导入 FFI 接口（.ti 文件）
+//   - 使用导入的函数和常量
+// ============================================================================
+
+// -- 导入本地模块 --
+from {native/math_utils} import {add, subtract, clamp, is_even, TAU}
+
+// -- 导入标准库（println/print/readln 为内置函数，无需导入） --
+from {res/std.math} import {sqrt, pow}
+
+// -- 导入 FFI 接口 --
+from {native/math_ffi} import {fast_multiply}
+
+fn main {
+    // -- 使用本地模块函数 --
+    println($"add(3, 4) = {add(3, 4)}")
+    println($"subtract(10, 3) = {subtract(10, 3)}")
+    println($"clamp(150, 0, 100) = {clamp(150, 0, 100)}")
+    println($"is_even(42) = {is_even(42)}")
+    println($"TAU = {TAU}")
+
+    // -- 使用标准库函数 --
+    println($"sqrt(144) = {sqrt(144.0)}")
+    println($"pow(2, 10) = {pow(2.0, 10.0)}")
+
+    // -- 使用 FFI 函数 --
+    let result = fast_multiply(6, 7)
+    println($"fast_multiply(6, 7) = {result}")
+}

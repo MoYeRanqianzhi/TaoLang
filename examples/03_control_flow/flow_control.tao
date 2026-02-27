@@ -1,0 +1,64 @@
+// ============================================================================
+// flow_control.tao -- 流程控制关键字
+// ============================================================================
+// 验证点：
+//   - break 跳出循环
+//   - continue 跳过当前迭代
+//   - return 提前返回
+//   - pass 空操作占位
+// ============================================================================
+
+// -- return 提前返回 --
+fn find_first_negative(values: list<int>) -> int {
+    for v in values {
+        if (v < 0) {
+            return v
+        }
+    }
+    return 0
+}
+
+// -- pass 占位符 --
+fn placeholder() {
+    pass   // 尚未实现，占位
+}
+
+fn main {
+    // -- break：找到目标后跳出 --
+    let target = 7
+    let i = 0
+    while (i < 100) {
+        if (i == target) {
+            println($"Found {target} at iteration {i}")
+            break
+        }
+        i = i + 1
+    }
+
+    // -- continue：跳过偶数，只打印奇数 --
+    let j = 0
+    while (j < 10) {
+        j = j + 1
+        if (j - (j / 2) * 2 == 0) {
+            continue
+        }
+        println($"odd: {j}")
+    }
+
+    // -- break 在 for 中 --
+    for x in [10, 20, 30, 40, 50] {
+        if (x > 25) {
+            println($"Stopping at {x}")
+            break
+        }
+        println($"Processing {x}")
+    }
+
+    // -- return 提前返回 --
+    let result = find_first_negative([3, 7, -2, 5, -8])
+    println($"First negative: {result}")   // -2
+
+    // -- pass 占位 --
+    placeholder()
+    println("placeholder() called successfully")
+}

@@ -1,0 +1,57 @@
+// ============================================================================
+// nested_spaces.tao -- 嵌套空间与 with
+// ============================================================================
+// 验证点：
+//   - with 表示空间嵌套关系
+//   - super 获取父空间
+//   - 多层嵌套
+//   - in 限定空间中的变量
+// ============================================================================
+
+// -- 顶层空间 --
+space app {
+    let name = "MyApp"
+    let version = "1.0"
+}
+
+// -- 嵌套空间 --
+space ui {
+    let theme = "dark"
+    let font_size = 14
+}
+
+space sidebar {
+    let width = 250
+    let collapsed = false
+}
+
+fn main {
+    // -- 基本嵌套：sidebar 嵌套在 ui 中 --
+    let nested = sidebar with ui
+
+    using nested {
+        println($"Theme: {theme}")           // 来自 ui
+        println($"Sidebar width: {width}")   // 来自 sidebar
+    }
+
+    // -- 三层嵌套 --
+    let deep = sidebar with ui with app
+
+    using deep {
+        println($"App: {name}")
+        println($"Theme: {theme}")
+        println($"Width: {width}")
+    }
+
+    // -- super 获取父空间 --
+    using ui {
+        let parent = super(ui)
+        println($"ui's parent is null: {parent == null}")
+    }
+
+    // -- in 限定访问 --
+    using app {
+        let app_name = name in app
+        println($"App name via 'in': {app_name}")
+    }
+}

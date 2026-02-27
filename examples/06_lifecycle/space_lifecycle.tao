@@ -1,0 +1,60 @@
+// ============================================================================
+// space_lifecycle.tao -- 空间生命周期演示
+// ============================================================================
+// 验证点：
+//   - 空间 on create：程序启动时触发
+//   - 空间 on enter / on exit：进入和离开时触发
+//   - 空间 on enter 提供 it（外部上下文），on exit 不传递 it
+//   - 空间 when enter / when exit：拦截进入和离开
+//   - when enter 的 it 参数（外部上下文）
+//   - when exit 不传递 it
+// ============================================================================
+
+// -- 带完整生命周期钩子的空间 --
+space session {
+    let user: str = "guest"
+    let login_count: int = 0
+}
+    [self] ->
+    on create { println("[session] Space created at startup") }
+    on enter { println($"[session] Entered. it = {it}") }
+    on exit { println("[session] Exited") }
+    on free { println("[session] Space freed") }
+
+// -- 带 when 钩子的受限空间 --
+space admin_panel {
+    let data = "admin secrets"
+}
+    [self] ->
+    when enter { it ->
+        println($"[admin] Checking access for: {it}")
+        // 简单的访问控制：只允许 admin 用户
+        goto self with it
+    }
+    when exit {
+        println("[admin] Cleaning up before exit")
+        goto super(self)
+    }
+
+fn main {
+    // -- 进入 session 空间 --
+    println("=== Session lifecycle ===")
+    using session {
+        user = "Alice"
+        login_count = login_count + 1
+        println($"User: {user}, Logins: {login_count}")
+    }
+    // 离开 session，触发 on exit
+
+    // -- 再次进入 --
+    using session {
+        login_count = login_count + 1
+        println($"User: {user}, Logins: {login_count}")
+    }
+
+    // -- 受限空间 --
+    println("\n=== Admin panel lifecycle ===")
+    using admin_panel {
+        println($"Accessing: {data}")
+    }
+}

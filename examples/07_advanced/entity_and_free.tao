@@ -1,0 +1,60 @@
+// ============================================================================
+// entity_and_free.tao -- [x] 完整实体与 free 语义
+// ============================================================================
+// 验证点：
+//   - [x] 访问完整实体（symbol + hooks + value）
+//   - *x 解引用（数值层指针）
+//   - free(x)：释放 symbol，实体可能存活
+//   - free([x])：强制释放完整实体所有层
+//   - 多 symbol 共享同一实体
+// ============================================================================
+
+fn main {
+    // -- 基本层级访问 --
+    println("=== Layer access ===")
+    let a = 42
+
+    // a    -> 通过外延层访问，经由内涵层到达数值
+    // *a   -> 数值层指针，直接操作底层数据
+    // [a]  -> 完整实体（symbol + hooks + value）
+    println($"a = {a}")
+    println($"*a = {*a}")
+
+    // -- 多 symbol 共享实体 --
+    println("\n=== Shared entity ===")
+    let x = 100
+        [self] ->
+        on free { println("Entity freed!") }
+
+    let y = x   // y 与 x 指向同一实体
+
+    // free(x) 仅释放 x 的 symbol
+    // y 仍然指向该实体，实体存活
+    free(x)
+    println($"y = {y}")   // 100，实体仍可通过 y 访问
+
+    // free([y]) 强制释放完整实体
+    // 触发 on free，所有层被回收
+    free([y])   // Entity freed!
+
+    // -- free 语义对比 --
+    println("\n=== Free semantics ===")
+    let p = 200
+        [self] ->
+        on free { println($"p entity freed, was {self}") }
+
+    // 无其他 symbol 指向 p 的实体
+    // free(p) 释放 symbol，因无其他引用，编译器自动优化释放实体
+    free(p)   // p entity freed, was 200
+
+    // -- [x] 在 del 中的使用 --
+    println("\n=== del with entity ===")
+    let temp = "hello"
+        [self] ->
+        on delete { println("temp deleted") }
+        on free { println("temp freed") }
+
+    // del 触发 when delete 默认行为：del [self]
+    // del [self] 再触发 when free 默认行为：free([self])
+    del temp
+}

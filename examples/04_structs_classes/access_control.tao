@@ -1,0 +1,67 @@
+// ============================================================================
+// access_control.tao -- 访问控制
+// ============================================================================
+// 验证点：
+//   - public：外部可读可写
+//   - protect：外部可读，不可写
+//   - private：仅内部可访问
+//   - 默认访问级别
+// ============================================================================
+
+class BankAccount(owner: str, initial_balance: float) {
+    // -- public：外部可读可写 --
+    public let owner: str = owner
+
+    // -- protect：外部可读，不可写 --
+    protect let balance: float = initial_balance
+
+    // -- private：仅内部可访问 --
+    private let transaction_count: int = 0
+
+    fn deposit(amount: float) {
+        if (amount > 0.0) {
+            self.balance = self.balance + amount
+            self.transaction_count = self.transaction_count + 1
+            println($"Deposited {amount}. Balance: {self.balance}")
+        }
+    }
+
+    fn withdraw(amount: float) -> bool {
+        if (amount > 0.0 && amount <= self.balance) {
+            self.balance = self.balance - amount
+            self.transaction_count = self.transaction_count + 1
+            println($"Withdrew {amount}. Balance: {self.balance}")
+            return true
+        }
+        println($"Withdrawal of {amount} failed. Balance: {self.balance}")
+        false
+    }
+
+    fn summary() {
+        // -- 内部可访问所有级别 --
+        println($"Account: {self.owner}")
+        println($"Balance: {self.balance}")
+        println($"Transactions: {self.transaction_count}")
+    }
+}
+
+fn main {
+    let account = BankAccount("Alice", 1000.0)
+
+    // -- public：可读可写 --
+    println($"Owner: {account.owner}")
+    account.owner = "Alice Smith"
+
+    // -- protect：可读，不可写 --
+    println($"Balance: {account.balance}")
+    // account.balance = 999999.0   // 编译错误：protect 不可外部写入
+
+    // -- private：不可外部访问 --
+    // println(account.transaction_count)  // 编译错误：private 不可外部访问
+
+    // -- 通过方法操作 --
+    account.deposit(500.0)
+    account.withdraw(200.0)
+    account.withdraw(2000.0)
+    account.summary()
+}

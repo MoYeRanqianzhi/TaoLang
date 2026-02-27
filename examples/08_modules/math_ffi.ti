@@ -1,0 +1,55 @@
+// ============================================================================
+// math_ffi.ti -- FFI 接口文件
+// ============================================================================
+// 验证点：
+//   - .ti 文件格式
+//   - link 指令链接外部库
+//   - 外部函数签名声明
+//   - 不透明类型声明（type）
+//   - 外部结构体声明
+//   - 跨平台条件链接
+// ============================================================================
+
+// -- 链接数学库 --
+#if platform(windows)
+link "./math_native.dll" {
+    fn fast_multiply(a: int, b: int) -> int
+    fn fast_divide(a: int, b: int) -> int
+    fn fast_power(base: float, exp: float) -> float
+}
+
+#if platform(linux)
+link "./libmath_native.so" {
+    fn fast_multiply(a: int, b: int) -> int
+    fn fast_divide(a: int, b: int) -> int
+    fn fast_power(base: float, exp: float) -> float
+}
+
+// -- 链接系统 C 库 --
+link "system:c" {
+    fn malloc(size: int) -> ptr
+    fn free(ptr: ptr) -> void
+    fn memcpy(dest: ptr, src: ptr, n: int) -> ptr
+}
+
+// -- 不透明类型 --
+link "./libcrypto.so" {
+    type HashContext
+
+    fn hash_init() -> HashContext
+    fn hash_update(ctx: HashContext, data: bytes) -> void
+    fn hash_final(ctx: HashContext) -> bytes
+}
+
+// -- 外部结构体 --
+link "./libgeom.so" {
+    struct Vec3 {
+        x: float,
+        y: float,
+        z: float
+    }
+
+    fn vec3_add(a: Vec3, b: Vec3) -> Vec3
+    fn vec3_dot(a: Vec3, b: Vec3) -> float
+    fn vec3_length(v: Vec3) -> float
+}

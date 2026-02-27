@@ -1,0 +1,50 @@
+// ============================================================================
+// on_hooks.tao -- on 钩子（被动监听）
+// ============================================================================
+// 验证点：
+//   - [self] -> 绑定语法
+//   - on create：声明并分配内存后触发
+//   - on use：读取后触发
+//   - on modify：修改后触发（self 已是新值，不传递 it）
+//   - on delete：del 删除后触发
+//   - on free：释放后触发
+//   - 多个 on 钩子组合
+// ============================================================================
+
+fn main {
+    // -- 单个 on 钩子 --
+    let counter = 0
+        [self] ->
+        on modify { println($"Counter changed to: {self}") }
+
+    counter = 1    // 触发：Counter changed to: 1
+    counter = 2    // 触发：Counter changed to: 2
+
+    // -- 多个 on 钩子组合 --
+    let tracked = "initial"
+        [self] ->
+        on create { println("tracked: created") }
+        on use { println($"tracked: read as '{self}'") }
+        on modify { println($"tracked: modified to '{self}'") }
+        on free { println("tracked: freed") }
+
+    let snapshot = tracked   // 触发 on use（读取 tracked）
+    tracked = "updated"      // 触发 on modify
+
+    // -- 自定义上下文名称 --
+    let sensor = 25.0
+        [ctx] ->
+        on modify { println($"Sensor reading: {ctx}") }
+
+    sensor = 26.5   // 触发：Sensor reading: 26.5
+    sensor = 27.1   // 触发：Sensor reading: 27.1
+
+    // -- del 触发 on delete 和 on free --
+    let temp = 42
+        [self] ->
+        on delete { println("temp: manually deleted") }
+        on free { println("temp: memory freed") }
+
+    del temp   // 触发 on delete，然后触发 on free
+}
+// tracked 在此处离开作用域，触发 on free

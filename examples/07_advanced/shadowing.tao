@@ -1,0 +1,70 @@
+// ============================================================================
+// shadowing.tao -- 变量遮蔽
+// ============================================================================
+// 验证点：
+//   - 嵌套空间中的变量遮蔽
+//   - 同一块中 let 重声明
+//   - 遮蔽不影响外层变量
+//   - 遮蔽变量的独立钩子
+// ============================================================================
+
+fn main {
+    // -- 嵌套空间遮蔽 --
+    println("=== Space shadowing ===")
+    let x = 10
+    println($"outer x = {x}")   // 10
+
+    space inner {
+        let x = 99   // 遮蔽外层 x
+    }
+
+    using inner {
+        println($"inner x = {x}")   // 99
+    }
+
+    println($"outer x = {x}")   // 10（外层不受影响）
+
+    // -- 同一块中 let 重声明 --
+    println("\n=== Let redeclaration ===")
+    let y = "first"
+    println($"y = {y}")   // first
+
+    let y = "second"      // 重声明，遮蔽前一个 y
+    println($"y = {y}")   // second
+
+    let y = 42            // 可以改变类型
+    println($"y = {y}")   // 42
+
+    // -- 遮蔽变量拥有独立钩子 --
+    println("\n=== Independent hooks ===")
+    let counter = 0
+        [self] ->
+        on modify { println($"Outer counter: {self}") }
+
+    space scope_a {
+        let counter = 100
+            [self] ->
+            on modify { println($"Inner counter: {self}") }
+
+        counter = 101   // 触发内层钩子：Inner counter: 101
+    }
+
+    counter = 1   // 触发外层钩子：Outer counter: 1
+
+    // -- 多层遮蔽 --
+    println("\n=== Multi-level shadowing ===")
+    let level = "L0"
+
+    space s1 {
+        let level = "L1"
+
+        space s2 {
+            let level = "L2"
+        }
+    }
+
+    println($"main: {level}")   // L0
+    using s1 {
+        println($"s1: {level}")   // L1
+    }
+}

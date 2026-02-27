@@ -1,0 +1,53 @@
+// ============================================================================
+// recursion.tao -- 递归函数
+// ============================================================================
+// 验证点：
+//   - 递归调用
+//   - 递归终止条件
+//   - 调用栈管理
+//   - 多递归分支（斐波那契）
+// ============================================================================
+
+// -- 阶乘：经典单分支递归 --
+fn factorial(n: int) -> int {
+    if (n <= 1) { return 1 }
+    n * factorial(n - 1)
+}
+
+// -- 斐波那契：双分支递归 --
+fn fibonacci(n: int) -> int {
+    if (n <= 0) { return 0 }
+    if (n == 1) { return 1 }
+    fibonacci(n - 1) + fibonacci(n - 2)
+}
+
+// -- 幂运算：递归实现 --
+fn power(base: int, exp: int) -> int {
+    if (exp == 0) { return 1 }
+    base * power(base, exp - 1)
+}
+
+// -- 最大公约数：辗转相除法 --
+fn gcd(a: int, b: int) -> int {
+    if (b == 0) { return a }
+    gcd(b, a - (a / b) * b)
+}
+
+fn main {
+    // -- 阶乘 --
+    println($"5! = {factorial(5)}")       // 120
+    println($"10! = {factorial(10)}")     // 3628800
+
+    // -- 斐波那契 --
+    println($"fib(0) = {fibonacci(0)}")   // 0
+    println($"fib(1) = {fibonacci(1)}")   // 1
+    println($"fib(10) = {fibonacci(10)}") // 55
+
+    // -- 幂运算 --
+    println($"2^10 = {power(2, 10)}")     // 1024
+    println($"3^5 = {power(3, 5)}")       // 243
+
+    // -- 最大公约数 --
+    println($"gcd(48, 18) = {gcd(48, 18)}")   // 6
+    println($"gcd(100, 75) = {gcd(100, 75)}") // 25
+}

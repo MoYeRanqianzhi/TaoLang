@@ -1,0 +1,85 @@
+// ============================================================================
+// conditionals.tao -- 条件分支
+// ============================================================================
+// 验证点：
+//   - if 单分支
+//   - if/else 双分支
+//   - if/else if/else 多分支
+//   - 嵌套条件
+//   - 布尔表达式作为条件
+// ============================================================================
+
+fn classify_number(n: int) -> str {
+    if (n > 0) {
+        return "positive"
+    } else if (n < 0) {
+        return "negative"
+    } else {
+        return "zero"
+    }
+}
+
+fn grade(score: int) -> str {
+    if (score >= 90) {
+        return "A"
+    } else if (score >= 80) {
+        return "B"
+    } else if (score >= 70) {
+        return "C"
+    } else if (score >= 60) {
+        return "D"
+    } else {
+        return "F"
+    }
+}
+
+fn check_range(x: int, low: int, high: int) -> bool {
+    if (x >= low) {
+        if (x <= high) {
+            return true
+        }
+    }
+    false
+}
+
+fn main {
+    // -- 基本 if/else --
+    let x = 42
+    if (x > 0) {
+        println($"{x} is positive")
+    }
+
+    // -- if/else --
+    let temperature = -5
+    if (temperature > 0) {
+        println("Above freezing")
+    } else {
+        println("Below freezing")
+    }
+
+    // -- 多分支 --
+    println($"10 is {classify_number(10)}")    // positive
+    println($"-3 is {classify_number(-3)}")    // negative
+    println($"0 is {classify_number(0)}")      // zero
+
+    // -- 成绩评级 --
+    println($"95 -> {grade(95)}")   // A
+    println($"85 -> {grade(85)}")   // B
+    println($"72 -> {grade(72)}")   // C
+    println($"61 -> {grade(61)}")   // D
+    println($"45 -> {grade(45)}")   // F
+
+    // -- 嵌套条件 --
+    let in_range = check_range(5, 1, 10)
+    println($"5 in [1, 10]: {in_range}")           // true
+    println($"15 in [1, 10]: {check_range(15, 1, 10)}")  // false
+
+    // -- 复合布尔条件 --
+    let age = 25
+    let has_license = true
+    if (age >= 18 && has_license) {
+        println("Can drive")
+    } else {
+        println("Cannot drive")
+    }
+}

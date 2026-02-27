@@ -1,0 +1,56 @@
+// ============================================================================
+// higher_order.tao -- 高阶函数
+// ============================================================================
+// 验证点：
+//   - 函数类型作为参数 (int, int) -> int
+//   - 函数作为值传递
+//   - 回调模式
+// ============================================================================
+
+// -- 接受函数作为参数 --
+fn apply(a: int, b: int, op: (int, int) -> int) -> int {
+    op(a, b)
+}
+
+// -- 具体操作函数 --
+fn add(a: int, b: int) -> int { a + b }
+fn sub(a: int, b: int) -> int { a - b }
+fn mul(a: int, b: int) -> int { a * b }
+
+// -- 对数组每个元素执行操作 --
+fn transform(value: int, f: (int) -> int) -> int {
+    f(value)
+}
+
+fn double(x: int) -> int { x * 2 }
+fn square(x: int) -> int { x * x }
+fn negate(x: int) -> int { -x }
+
+// -- 条件执行：根据布尔值选择不同回调 --
+fn choose_and_run(condition: bool, on_true: () -> void, on_false: () -> void) {
+    if (condition) {
+        on_true()
+    } else {
+        on_false()
+    }
+}
+
+fn say_yes() { println("Yes!") }
+fn say_no() { println("No!") }
+
+fn main {
+    // -- apply 高阶函数 --
+    println($"apply(10, 3, add) = {apply(10, 3, add)}")   // 13
+    println($"apply(10, 3, sub) = {apply(10, 3, sub)}")   // 7
+    println($"apply(10, 3, mul) = {apply(10, 3, mul)}")   // 30
+
+    // -- transform --
+    let val = 5
+    println($"double({val}) = {transform(val, double)}")   // 10
+    println($"square({val}) = {transform(val, square)}")   // 25
+    println($"negate({val}) = {transform(val, negate)}")   // -5
+
+    // -- 条件回调 --
+    choose_and_run(true, say_yes, say_no)    // Yes!
+    choose_and_run(false, say_yes, say_no)   // No!
+}

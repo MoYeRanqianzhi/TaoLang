@@ -1,0 +1,73 @@
+// ============================================================================
+// variable_lifecycle.tao -- 完整变量生命周期演示
+// ============================================================================
+// 验证点：
+//   - 变量从 create 到 free 的完整事件序列
+//   - let x = 30 的两步语义：create（分配内存）+ modify（写入值）
+//   - del 手动删除触发 delete -> free
+//   - 作用域结束自动触发 free
+//   - on 和 when 钩子的触发顺序
+// ============================================================================
+
+fn main {
+    // -- 完整生命周期追踪 --
+    println("=== Full lifecycle ===")
+
+    let x = 42
+        [self] ->
+        on create { println("  on create: memory allocated") }
+        on modify { println($"  on modify: value is now {self}") }
+        on use { println($"  on use: read value {self}") }
+        on delete { println("  on delete: manually deleted") }
+        on free { println("  on free: memory released") }
+
+    // 上面的 let x = 42 触发：
+    //   1. create 事件（分配内存）-> on create
+    //   2. modify 事件（写入 42）-> on modify
+
+    // -- 读取触发 on use --
+    println($"x = {x}")
+
+    // -- 修改触发 on modify --
+    x = 100
+
+    // -- del 触发 on delete -> on free --
+    del x
+
+    // -- 两步语义演示 --
+    println("\n=== Two-step semantics ===")
+
+    let y = 30
+        [self] ->
+        when create { it: int ->
+            println($"  when create: allocating for type {it of type}")
+            *[self] = alloc(it)
+        }
+        when modify { it ->
+            println($"  when modify: {self} -> {it}")
+            if (isScalar(it)) self = it
+            else *self = *it
+        }
+        on create { println("  on create: done") }
+        on modify { println($"  on modify: value is now {self}") }
+
+    // let y = 30 触发序列：
+    //   1. when create（分配内存）-> on create
+    //   2. when modify（写入 30）-> on modify
+
+    y = 50
+    // 触发：when modify -> on modify
+
+    // -- 作用域结束自动释放 --
+    println("\n=== Scope-based free ===")
+    space {
+        let temp = "temporary"
+            [self] ->
+            on create { println("  temp created") }
+            on free { println("  temp freed (scope ended)") }
+
+        println($"  temp = {temp}")
+    }
+    // 离开匿名空间，temp 自动触发 free
+    println("After anonymous space")
+}

@@ -1,0 +1,49 @@
+// ============================================================================
+// delegation.tao -- as 委托变量
+// ============================================================================
+// 验证点：
+//   - let x as expr()：每次读取时重新求值
+//   - let x = default as Type -> { expr }：带默认值的委托
+//   - 委托变量的动态特性
+// ============================================================================
+
+// -- 模拟时间函数 --
+def tick_count = 0
+fn get_tick() -> int {
+    tick_count = tick_count + 1
+    tick_count
+}
+
+fn get_timestamp() -> str {
+    $"T+{get_tick()}"
+}
+
+fn main {
+    // -- 基本委托：每次读取重新求值 --
+    println("=== Basic delegation ===")
+    let now as get_timestamp()
+
+    println($"now = {now}")   // T+1
+    println($"now = {now}")   // T+2
+    println($"now = {now}")   // T+3
+    // 每次读取 now 都会调用 get_timestamp()
+
+    // -- 带默认值的委托 --
+    println("\n=== Delegation with default ===")
+    let dynamic_value = 0 as int -> {
+        get_tick() * 10
+    }
+
+    println($"dynamic_value = {dynamic_value}")   // 40（tick=4, 4*10）
+    println($"dynamic_value = {dynamic_value}")   // 50（tick=5, 5*10）
+
+    // -- 委托 vs 普通变量对比 --
+    println("\n=== Delegation vs normal ===")
+    let static_val = get_tick()       // 求值一次，固定为 6
+    let dynamic_val as get_tick()     // 每次读取重新求值
+
+    println($"static  = {static_val}")    // 6
+    println($"static  = {static_val}")    // 6（不变）
+    println($"dynamic = {dynamic_val}")   // 7
+    println($"dynamic = {dynamic_val}")   // 8（每次递增）
+}

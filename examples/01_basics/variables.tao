@@ -1,0 +1,48 @@
+// ============================================================================
+// variables.tao -- 三种变量声明与字符串插值
+// ============================================================================
+// 验证点：
+//   - let 局部变量（类型推断 + 显式类型注解 + 延迟初始化）
+//   - const 编译期常量（标量类型限制）
+//   - def 全局变量
+//   - 字符串插值 $"...{expr}..."
+//   - 变量赋值与修改
+// ============================================================================
+
+// -- 编译期常量：全局可见，不可修改，仅支持标量类型 --
+const PI = 3.14159
+const MAX_COUNT = 100
+const APP_NAME = "TaoLang"
+const VERSION = (0, 1, 0)
+
+// -- 全局变量：作用域位于 null 层级 --
+def debug_mode = false
+def app_version = "0.1.0"
+
+fn main {
+    // -- let：类型推断 --
+    let x = 42
+    let greeting = "hello"
+    let is_ready = true
+
+    // -- let：显式类型注解 --
+    let y: int = 100
+    let name: str = "TaoLang"
+    let ratio: float = 0.618
+
+    // -- let：延迟初始化 --
+    let result: int
+    result = x + y
+
+    // -- 变量修改 --
+    let counter = 0
+    counter = counter + 1
+    counter = counter + 1
+
+    // -- 字符串插值 --
+    println($"App: {APP_NAME}, Version: {app_version}")
+    println($"x = {x}, y = {y}, result = {result}")
+    println($"counter = {counter}")
+    println($"PI = {PI}, MAX_COUNT = {MAX_COUNT}")
+    println($"Debug mode: {debug_mode}")
+}

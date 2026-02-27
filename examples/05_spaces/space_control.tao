@@ -1,0 +1,57 @@
+// ============================================================================
+// space_control.tao -- 空间控制流
+// ============================================================================
+// 验证点：
+//   - goto 跳转到指定空间
+//   - break 跳出当前空间
+//   - goto...with 携带上下文跳转
+// ============================================================================
+
+space lobby {
+    let message = "Welcome to the lobby"
+}
+
+space game_room {
+    let message = "Game in progress"
+    let players = 0
+}
+
+space results {
+    let message = "Game over"
+    let score = 0
+}
+
+fn main {
+    // -- goto 跳转空间 --
+    println("Starting in main...")
+
+    using lobby {
+        println(message)
+        // 从 lobby 跳转到 game_room
+        goto game_room
+    }
+
+    using game_room {
+        println(message)
+        players = 4
+        println($"Players: {players}")
+
+        // -- break 跳出当前空间 --
+        if (players > 3) {
+            println("Room full, breaking out")
+            break
+        }
+    }
+
+    // -- goto with 携带上下文 --
+    using game_room {
+        let final_score = 42
+        // 携带上下文跳转到 results
+        goto results with self
+    }
+
+    using results {
+        println(message)
+        println($"Final score: {score}")
+    }
+}

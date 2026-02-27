@@ -1,0 +1,57 @@
+// ============================================================================
+// basic_space.tao -- 空间声明与 using
+// ============================================================================
+// 验证点：
+//   - space 声明（空声明 + 带初始化）
+//   - using 进入空间
+//   - 空间内变量访问（using 块中不需要 self.）
+//   - 空间内变量修改
+//   - 语法糖：space m { code } = space m; using m { code }
+// ============================================================================
+
+// -- 空声明 --
+space empty_space
+
+// -- 带初始化的空间 --
+space config {
+    let timeout: int = 30
+    let max_retries: int = 3
+    let base_url: str = "https://api.example.com"
+}
+
+// -- 空间内定义函数 --
+space math_utils {
+    fn square(x: int) -> int { x * x }
+    fn cube(x: int) -> int { x * x * x }
+}
+
+fn main {
+    // -- using 进入空间，直接访问变量（不需要 self.） --
+    using config {
+        println($"Timeout: {timeout}")
+        println($"Max retries: {max_retries}")
+        println($"Base URL: {base_url}")
+
+        // -- 修改空间内变量 --
+        timeout = 60
+        println($"Updated timeout: {timeout}")
+    }
+
+    // -- 使用空间内的函数 --
+    using math_utils {
+        let sq = square(5)
+        let cb = cube(3)
+        println($"5^2 = {sq}")
+        println($"3^3 = {cb}")
+    }
+
+    // -- 语法糖形式：声明并立即使用 --
+    space session {
+        let user = "Alice"
+        let token = "abc123"
+    }
+
+    using session {
+        println($"User: {user}, Token: {token}")
+    }
+}

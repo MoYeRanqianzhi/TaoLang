@@ -1,0 +1,45 @@
+// ============================================================================
+// anonymous_space.tao -- 匿名空间
+// ============================================================================
+// 验证点：
+//   - 匿名空间声明（无名称）
+//   - 离开后变量自动回收
+//   - 临时状态隔离
+// ============================================================================
+
+fn main {
+    let result = 0
+
+    // -- 匿名空间：临时计算，离开后 temp 被回收 --
+    space {
+        let temp = 100
+        let adjusted = temp * 2 + 50
+        result = adjusted
+        println($"Inside anonymous space: temp = {temp}, adjusted = {adjusted}")
+    }
+    // temp 和 adjusted 在此处已不可访问
+
+    println($"Result from anonymous space: {result}")
+
+    // -- 多个匿名空间互不干扰 --
+    space {
+        let x = "first"
+        println($"Space 1: {x}")
+    }
+
+    space {
+        let x = "second"
+        println($"Space 2: {x}")
+    }
+
+    // -- 嵌套匿名空间 --
+    space {
+        let outer = 10
+        space {
+            let inner = 20
+            println($"Nested: outer = {outer}, inner = {inner}")
+        }
+        // inner 在此处已不可访问
+        println($"After inner space: outer = {outer}")
+    }
+}

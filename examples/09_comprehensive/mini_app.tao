@@ -1,0 +1,159 @@
+// ============================================================================
+// mini_app.tao -- 综合示例：简易任务管理器
+// ============================================================================
+// 验证点：
+//   - 综合运用所有语法特性
+//   - struct + class + space + hooks + modules 协同工作
+//   - 真实应用场景模拟
+// ============================================================================
+
+// ---- 常量 ----
+const MAX_TASKS = 100
+const APP_NAME = "TaoTask"
+const VERSION = (0, 1, 0)
+
+// ---- 全局状态 ----
+def next_id = 0
+
+// ---- 数据结构 ----
+struct Task {
+    id: int,
+    title: str,
+    done: bool
+}
+
+fn Task.new(title: str) -> Task {
+    next_id = next_id + 1
+    Task { id: next_id, title: title, done: false }
+}
+
+fn Task.to_string() -> str {
+    let status = "[x]"
+    if (!self.done) { status = "[ ]" }
+    $"#{self.id} {status} {self.title}"
+}
+
+// ---- 任务管理器类 ----
+class TaskManager {
+    let tasks: list<Task> = []
+    let count: int = 0
+
+    fn add(title: str) {
+        if (self.count >= MAX_TASKS) {
+            println("Error: task limit reached")
+            return
+        }
+        let task = Task.new(title)
+        self.tasks = self.tasks + [task]
+        self.count = self.count + 1
+        println($"Added: {task.to_string()}")
+    }
+
+    fn complete(id: int) -> bool {
+        for task in self.tasks {
+            if (task.id == id && !task.done) {
+                task.done = true
+                println($"Completed: {task.to_string()}")
+                return true
+            }
+        }
+        println($"Task #{id} not found or already done")
+        false
+    }
+
+    fn list_all() {
+        println($"\n--- {APP_NAME} v{VERSION} ---")
+        if (self.count == 0) {
+            println("  (no tasks)")
+            return
+        }
+        for task in self.tasks {
+            println($"  {task.to_string()}")
+        }
+        println($"--- {self.count} task(s) ---\n")
+    }
+
+    fn pending_count() -> int {
+        let pending = 0
+        for task in self.tasks {
+            if (!task.done) {
+                pending = pending + 1
+            }
+        }
+        pending
+    }
+}
+
+// ---- 应用空间 ----
+space app_state {
+    let manager = TaskManager()
+    let operation_log: list<str> = []
+}
+
+// ---- 审计空间：记录所有操作 ----
+space audit {
+    let entries: list<str> = []
+
+    fn log(message: str) {
+        self.entries = self.entries + [message]
+        println($"[AUDIT] {message}")
+    }
+}
+
+// ---- 带钩子的操作计数器 ----
+fn main {
+    println($"Welcome to {APP_NAME}!")
+
+    // -- 操作计数器：每次修改时记录 --
+    let op_count = 0
+        [self] ->
+        on modify { println($"  (operations: {self})") }
+
+    // -- 使用应用空间 --
+    using app_state {
+        // 添加任务
+        manager.add("Design TaoLang syntax")
+        op_count = op_count + 1
+
+        manager.add("Implement lexer")
+        op_count = op_count + 1
+
+        manager.add("Implement parser")
+        op_count = op_count + 1
+
+        manager.add("Build LLVM backend")
+        op_count = op_count + 1
+
+        // 列出所有任务
+        manager.list_all()
+
+        // 完成一些任务
+        manager.complete(1)
+        op_count = op_count + 1
+
+        manager.complete(2)
+        op_count = op_count + 1
+
+        // 查看待办数量
+        let pending = manager.pending_count()
+        println($"Pending tasks: {pending}")
+
+        // 再次列出
+        manager.list_all()
+    }
+
+    // -- 审计日志 --
+    using audit {
+        log("Session started")
+        log($"Total operations: {op_count}")
+        log("Session ended")
+    }
+
+    // -- 匿名空间：临时统计 --
+    space {
+        let summary = $"{APP_NAME}: {op_count} operations completed"
+        println(summary)
+    }
+
+    println("Goodbye!")
+}

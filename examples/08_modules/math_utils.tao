@@ -1,0 +1,30 @@
+// ============================================================================
+// math_utils.tao -- 被导入的数学工具模块
+// ============================================================================
+// 验证点：
+//   - package 声明
+//   - 可导出的函数
+//   - 模块内部的 const
+// ============================================================================
+
+package math_utils
+
+const TAU = 6.28318
+
+fn add(a: int, b: int) -> int {
+    a + b
+}
+
+fn subtract(a: int, b: int) -> int {
+    a - b
+}
+
+fn clamp(value: int, low: int, high: int) -> int {
+    if (value < low) { return low }
+    if (value > high) { return high }
+    value
+}
+
+fn is_even(n: int) -> bool {
+    n - (n / 2) * 2 == 0
+}

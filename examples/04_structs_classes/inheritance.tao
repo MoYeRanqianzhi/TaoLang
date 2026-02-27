@@ -1,0 +1,110 @@
+// ============================================================================
+// inheritance.tao -- 继承与 override
+// ============================================================================
+// 验证点：
+//   - 类继承类（class Child : Parent）
+//   - 类继承结构体（class Entity : Position）
+//   - override 方法覆盖
+//   - override 属性覆盖
+//   - super 访问父类成员
+// ============================================================================
+
+// -- 基类 --
+class Animal {
+    let name: str = "Unknown"
+    let sound: str = "..."
+
+    fn speak() {
+        println($"{self.name} says {self.sound}")
+    }
+
+    fn describe() {
+        println($"Animal: {self.name}")
+    }
+}
+
+// -- 子类：覆盖方法和属性 --
+class Dog : Animal {
+    let breed: str = "Mixed"
+
+    override let sound = "Woof!"
+
+    override fn describe() {
+        println($"Dog: {self.name}, Breed: {self.breed}")
+    }
+}
+
+class Cat : Animal {
+    override let sound = "Meow!"
+
+    override fn describe() {
+        println($"Cat: {self.name}")
+    }
+}
+
+// -- 多层继承 --
+class Puppy : Dog {
+    override let sound = "Yip!"
+
+    override fn describe() {
+        println($"Puppy: {self.name}, Breed: {self.breed}")
+    }
+
+    fn show_parent_info() {
+        println($"Parent sound would be: {super.sound}")
+    }
+}
+
+// -- 类继承结构体 --
+struct Position {
+    x: float,
+    y: float,
+    z: float
+}
+
+class Entity : Position {
+    let id: str = "entity_0"
+    let health: int = 100
+
+    fn move_to(nx: float, ny: float, nz: float) {
+        self.x = nx
+        self.y = ny
+        self.z = nz
+    }
+
+    fn status() {
+        println($"[{self.id}] pos=({self.x}, {self.y}, {self.z}) hp={self.health}")
+    }
+}
+
+fn main {
+    // -- 基本继承 --
+    let dog = Dog()
+    dog.name = "Rex"
+    dog.breed = "Labrador"
+    dog.speak()       // Rex says Woof!
+    dog.describe()    // Dog: Rex, Breed: Labrador
+
+    let cat = Cat()
+    cat.name = "Whiskers"
+    cat.speak()       // Whiskers says Meow!
+    cat.describe()    // Cat: Whiskers
+
+    // -- 多层继承 --
+    let puppy = Puppy()
+    puppy.name = "Tiny"
+    puppy.breed = "Poodle"
+    puppy.speak()              // Tiny says Yip!
+    puppy.describe()           // Puppy: Tiny, Breed: Poodle
+    puppy.show_parent_info()   // Parent sound would be: Woof!
+
+    // -- 类继承结构体 --
+    let player = Entity()
+    player.id = "player_1"
+    player.x = 0.0
+    player.y = 0.0
+    player.z = 0.0
+    player.status()
+    player.move_to(10.0, 5.0, 3.0)
+    player.status()
+}
