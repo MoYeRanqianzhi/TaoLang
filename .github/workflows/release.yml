@@ -310,12 +310,11 @@ jobs:
 
           echo "::group::Extract LLVM"
           7z x llvm.tar.xz -o"${RUNNER_TEMP}" -y > /dev/null
-          7z x "${RUNNER_TEMP}/clang+llvm-${LLVM_VERSION}-x86_64-pc-windows-msvc.tar" \
-            -o"${RUNNER_TEMP}/llvm_extract" -y > /dev/null
+          7z x "${RUNNER_TEMP}/llvm.tar" -o"${RUNNER_TEMP}/llvm_extract" -y > /dev/null
           mv "${RUNNER_TEMP}/llvm_extract/clang+llvm-${LLVM_VERSION}-x86_64-pc-windows-msvc" \
             "C:/llvm"
           rm -f llvm.tar.xz
-          rm -rf "${RUNNER_TEMP}/clang+llvm-"* "${RUNNER_TEMP}/llvm_extract"
+          rm -rf "${RUNNER_TEMP}/llvm.tar" "${RUNNER_TEMP}/llvm_extract"
           echo "::endgroup::"
 
           echo "::group::Create libxml2s.lib stub"
@@ -510,12 +509,11 @@ jobs:
 
           echo "::group::Extract LLVM"
           7z x llvm.tar.xz -o"${RUNNER_TEMP}" -y > /dev/null
-          7z x "${RUNNER_TEMP}/clang+llvm-${LLVM_VERSION}-x86_64-pc-windows-msvc.tar" \
-            -o"${RUNNER_TEMP}/llvm_extract" -y > /dev/null
+          7z x "${RUNNER_TEMP}/llvm.tar" -o"${RUNNER_TEMP}/llvm_extract" -y > /dev/null
           mv "${RUNNER_TEMP}/llvm_extract/clang+llvm-${LLVM_VERSION}-x86_64-pc-windows-msvc" \
             "C:/llvm"
           rm -f llvm.tar.xz
-          rm -rf "${RUNNER_TEMP}/clang+llvm-"* "${RUNNER_TEMP}/llvm_extract"
+          rm -rf "${RUNNER_TEMP}/llvm.tar" "${RUNNER_TEMP}/llvm_extract"
           echo "::endgroup::"
 
           echo "::group::Create libxml2s.lib stub"
