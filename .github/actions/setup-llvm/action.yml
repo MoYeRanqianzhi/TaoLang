@@ -2,18 +2,26 @@
 # setup-llvm — 可复用的 LLVM 安装 composite action
 # =============================================================================
 #
-# 封装 LLVM 预编译包的下载、缓存、解压和桩库创建，
+# 封装 LLVM 预编译包的下载、缓存、解压和系统依赖安装，
 # 消除 ci.yml 和 release.yml 中的重复代码。
 #
 # 支持平台：
 #   - Windows (7z 解压, llvm-lib.exe 创建 .lib 桩)
-#   - Linux/macOS (tar 解压, ar 创建 .a 桩)
+#   - Linux   (tar 解压, apt 安装系统依赖)
+#   - macOS   (tar 解压, brew 安装系统依赖)
 #
 # 注意：LLVM 21.x 起预编译包命名规则有变化：
 #   - Windows: clang+llvm-21.1.8-x86_64-pc-windows-msvc.tar.xz
 #   - Linux:   LLVM-21.1.8-Linux-X64.tar.xz
 #   - macOS:   LLVM-21.1.8-macOS-ARM64.tar.xz
 #   解压后目录名各不相同，本 action 使用动态检测而非硬编码目录名。
+#
+# LLVM 系统依赖：
+#   LLVM 预编译库在链接时需要以下系统库（由 llvm-config --system-libs 报告）：
+#   - zstd：LLVM 压缩段支持（macOS 需要通过 Homebrew 安装）
+#   - xml2：LLVM 部分功能依赖（macOS/Linux 需要确保可用）
+#   - z：zlib（通常系统自带）
+#   - c++/m/iconv：系统标准库（通常自带）
 #
 # 使用方式：
 #   - uses: ./.github/actions/setup-llvm
@@ -52,6 +60,26 @@ inputs:
 runs:
   using: composite
   steps:
+    # 安装 LLVM 链接时需要的系统级依赖
+    # 这些库由 llvm-config --system-libs 报告，链接时必须可用。
+    # 无论 LLVM 是否走缓存，系统依赖都需要安装（每次新 runner 都是全新环境）。
+    - name: Install LLVM system dependencies
+      shell: bash
+      run: |
+        if [ "${{ runner.os }}" = "macOS" ]; then
+          # macOS runner 不自带 zstd；libxml2 在 SDK 中但 Homebrew 版更可靠
+          echo "::group::Install macOS dependencies (zstd, libxml2)"
+          brew install zstd libxml2
+          echo "::endgroup::"
+        elif [ "${{ runner.os }}" = "Linux" ]; then
+          # Ubuntu runner 通常已有这些库，但显式安装确保可靠性
+          echo "::group::Install Linux dependencies (zstd, libxml2)"
+          sudo apt-get update -qq
+          sudo apt-get install -y libzstd-dev libxml2-dev
+          echo "::endgroup::"
+        fi
+        # Windows: 系统依赖通过 LLVM 自带的桩库解决，无需额外安装
+
     # 缓存 LLVM 安装目录
     # LLVM 预编译包解压后约 1~3GB，首次下载和解压需要数分钟。
     # 缓存键包含 LLVM 版本号和平台标识，版本更新时自动失效。
@@ -115,28 +143,17 @@ runs:
         rm -rf "${RUNNER_TEMP}/llvm.tar" "${RUNNER_TEMP}/llvm_extract"
         echo "::endgroup::"
 
-        echo "::group::Create libxml2 stub library"
-        # LLVM 预编译库链接时可能引用 libxml2，但 TaoLang 不使用 XML 功能。
-        # 创建一个包含空函数的桩库来满足链接器要求（无害，即使不需要也不影响）。
-        echo "void __libxml2s_stub(void) {}" > stub.c
+        # Windows 需要创建桩库来满足链接器要求
+        # Linux/macOS 通过安装系统包（上面的 apt/brew 步骤）提供真实库
         if [ "${{ inputs.stub-lib-ext }}" = "lib" ]; then
-          # Windows: 使用 LLVM 自带的工具创建 .lib
+          echo "::group::Create Windows stub libraries"
+          # libxml2s.lib — LLVM Windows 静态链接引用的 XML 库
+          echo "void __libxml2s_stub(void) {}" > stub.c
           "$INSTALL_DIR/bin/clang.exe" -c stub.c -o stub.obj
           "$INSTALL_DIR/bin/llvm-lib.exe" /OUT:"$INSTALL_DIR/lib/libxml2s.lib" stub.obj
-          rm -f stub.obj
-        else
-          # Linux/macOS: 优先使用 LLVM 自带的 clang，回退到系统 cc
-          CLANG="$INSTALL_DIR/bin/clang"
-          if [ ! -x "$CLANG" ]; then
-            CLANG="cc"
-            echo "::notice::LLVM clang not found, using system cc for stub library"
-          fi
-          "$CLANG" -c stub.c -o stub.o
-          ar rcs "$INSTALL_DIR/lib/libxml2s.a" stub.o
-          rm -f stub.o
+          rm -f stub.c stub.obj
+          echo "::endgroup::"
         fi
-        rm -f stub.c
-        echo "::endgroup::"
 
         echo "::notice::LLVM ${{ inputs.llvm-version }} installed to $INSTALL_DIR"
 
