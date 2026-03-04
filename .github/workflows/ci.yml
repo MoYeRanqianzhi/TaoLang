@@ -6,24 +6,21 @@
 #
 # 功能说明：
 #   本工作流在每次代码推送到主分支或 Pull Request 时自动运行，执行以下检查：
-#   1. 编译检查   — 确保 taoc（编译器）和 taichi（包管理器）在 Windows 上编译通过
-#   2. 单元测试   — 运行项目中的所有测试，验证词法/语法/代码生成的正确性
+#   1. 跨平台编译 — 确保代码在 Windows/Linux/macOS 上均可编译通过
+#   2. 单元测试   — 运行项目中的所有测试，验证功能正确性
 #   3. Release 构建 — 验证 release profile（fat LTO 等）下也能正常编译
 #   4. Clippy      — Rust 官方 lint 工具，检测常见错误和代码异味
 #   5. Rustfmt     — 代码格式检查，确保团队统一代码风格
 #   6. 依赖审计   — 检测依赖中已知的安全漏洞
 #
 # 平台说明：
-#   taoc 依赖 LLVM 21.1.8 进行代码生成，当前仅支持 Windows (x86_64-pc-windows-msvc)。
-#   编译、测试、Clippy 作业在 Windows 上运行（需要 LLVM 环境）。
-#   格式检查和安全审计不需要编译，在 Ubuntu 上运行以加速执行。
-#
-# 注意事项：
-#   - 项目使用 Rust edition 2024，需要较新的 Rust 工具链
-#   - LLVM 预编译包通过 actions/cache 缓存，避免每次下载 ~1GB 的安装包
-#   - 需要创建 libxml2s.lib 空桩文件（LLVM 预编译包依赖但项目不使用）
-#   - clippy 和 fmt 当前设为 continue-on-error: true（软性检查），
-#     项目稳定后可改为 false 以强制通过
+#   taoc 依赖 LLVM 21.1.8 进行代码生成，在 4 个平台上并行构建：
+#     - Windows x86_64  (windows-latest)
+#     - Linux x86_64    (ubuntu-latest)
+#     - macOS ARM       (macos-latest, Apple Silicon)
+#     - macOS Intel     (macos-13)
+#   LLVM 预编译包通过 composite action (.github/actions/setup-llvm) 安装并缓存。
+#   格式检查和安全审计不需要 LLVM，在 Ubuntu 上运行以加速执行。
 # =============================================================================
 
 name: CI
@@ -32,7 +29,6 @@ name: CI
 # 触发条件：
 #   - push：向 master 或 main 分支推送代码时触发（排除 tag 推送，避免与发布工作流重复）
 #   - pull_request：向 master 或 main 分支提交 PR 时触发
-# 这确保了所有进入主分支的代码都经过 CI 检查
 # ---------------------------------------------------------------------------
 on:
   push:
@@ -45,11 +41,8 @@ on:
 # 全局环境变量
 # ---------------------------------------------------------------------------
 env:
-  # 启用 cargo 输出着色，方便在 Actions 日志中阅读
   CARGO_TERM_COLOR: always
-  # 增量编译在 CI 中反而会因缓存恢复开销降低效率，显式禁用
   CARGO_INCREMENTAL: 0
-  # LLVM 版本号（用于构建下载 URL 和缓存键）
   LLVM_VERSION: "21.1.8"
 
 # ---------------------------------------------------------------------------
@@ -58,79 +51,72 @@ env:
 jobs:
 
   # =========================================================================
-  # 作业 1：编译 + 测试 + Clippy（合并为一个作业，避免重复安装 LLVM）
+  # 作业 1：跨平台编译 + 测试 + Clippy
   # =========================================================================
-  # taoc 依赖 llvm-sys 进行代码生成，所有编译和测试都需要 LLVM 环境。
-  # LLVM 安装包约 1GB，安装后约 3GB，将编译、测试、Clippy 合并到一个作业中
-  # 可以复用同一次 LLVM 安装，避免三倍的安装开销。
+  # 使用矩阵策略在 4 个平台上并行构建。
+  # LLVM 安装通过 composite action 统一处理，各平台差异封装在矩阵变量中。
   # =========================================================================
   build-and-test:
-    name: Build & Test & Clippy
-    runs-on: windows-latest
+    name: Build & Test (${{ matrix.llvm_cache_key }})
+    runs-on: ${{ matrix.runner }}
 
-    # LLVM 环境变量（仅 Windows 作业需要）
-    env:
-      LLVM_SYS_211_PREFIX: "C:\\llvm"
+    strategy:
+      # 某个平台失败不影响其他平台，一次性发现所有问题
+      fail-fast: false
+      matrix:
+        include:
+          # Windows x86_64
+          - runner: windows-latest
+            llvm_package: "clang+llvm-21.1.8-x86_64-pc-windows-msvc"
+            llvm_install: "C:/llvm"
+            llvm_cache_key: "x86_64-pc-windows-msvc"
+            extract_tool: "7z"
+            stub_lib_ext: "lib"
+
+          # Linux x86_64
+          - runner: ubuntu-latest
+            llvm_package: "clang+llvm-21.1.8-x86_64-linux-gnu-ubuntu-24.04"
+            llvm_install: "/opt/llvm"
+            llvm_cache_key: "x86_64-linux-gnu"
+            extract_tool: "tar"
+            stub_lib_ext: "a"
+
+          # macOS ARM (Apple Silicon)
+          - runner: macos-latest
+            llvm_package: "clang+llvm-21.1.8-arm64-apple-darwin"
+            llvm_install: "/opt/llvm"
+            llvm_cache_key: "arm64-apple-darwin"
+            extract_tool: "tar"
+            stub_lib_ext: "a"
+
+          # macOS Intel
+          - runner: macos-13
+            llvm_package: "clang+llvm-21.1.8-x86_64-apple-darwin"
+            llvm_install: "/opt/llvm"
+            llvm_cache_key: "x86_64-apple-darwin"
+            extract_tool: "tar"
+            stub_lib_ext: "a"
 
     steps:
-      # 步骤 1：检出代码
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 步骤 2：安装 Rust 稳定版工具链（附带 clippy 组件）
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
 
-      # 步骤 3：缓存 LLVM 安装目录
-      # LLVM 预编译包解压后约 3GB，首次下载和解压需要数分钟。
-      # 缓存后后续构建可直接复用，跳过下载和解压步骤。
-      # 缓存键包含 LLVM 版本号和平台，版本更新时自动失效。
-      # 末尾的 v1 为缓存版本号，需要强制刷新缓存时递增。
-      - name: Cache LLVM
-        id: cache-llvm
-        uses: actions/cache@v4
+      # 安装 LLVM（使用 composite action，封装下载/缓存/解压/桩库逻辑）
+      - name: Setup LLVM
+        uses: ./.github/actions/setup-llvm
         with:
-          path: C:\llvm
-          key: llvm-${{ env.LLVM_VERSION }}-x86_64-pc-windows-msvc-v1
+          llvm-version: ${{ env.LLVM_VERSION }}
+          llvm-package: ${{ matrix.llvm_package }}
+          llvm-install: ${{ matrix.llvm_install }}
+          cache-key: ${{ matrix.llvm_cache_key }}
+          extract-tool: ${{ matrix.extract_tool }}
+          stub-lib-ext: ${{ matrix.stub_lib_ext }}
 
-      # 步骤 4：下载并安装 LLVM（仅在缓存未命中时执行）
-      # 从 LLVM GitHub Releases 下载预编译包，使用 7z 两步解压（.xz → .tar → 目录），
-      # 然后创建 libxml2s.lib 空桩（LLVM 链接需要但项目不使用 libxml2 功能）。
-      - name: Download and install LLVM
-        if: steps.cache-llvm.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          LLVM_URL="https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/clang+llvm-${LLVM_VERSION}-x86_64-pc-windows-msvc.tar.xz"
-          echo "::group::Download LLVM ${LLVM_VERSION}"
-          curl -L --fail --retry 3 -o llvm.tar.xz "$LLVM_URL"
-          echo "::endgroup::"
-
-          echo "::group::Extract LLVM"
-          # Windows 内置 tar 不支持 xz，使用 7z 两步解压：
-          #   1. 解压 .xz → .tar（7z 以输入文件名去掉 .xz 后缀命名，即 llvm.tar）
-          #   2. 解压 .tar → 目录
-          7z x llvm.tar.xz -o"${RUNNER_TEMP}" -y > /dev/null
-          7z x "${RUNNER_TEMP}/llvm.tar" -o"${RUNNER_TEMP}/llvm_extract" -y > /dev/null
-          mv "${RUNNER_TEMP}/llvm_extract/clang+llvm-${LLVM_VERSION}-x86_64-pc-windows-msvc" \
-            "C:/llvm"
-          rm -f llvm.tar.xz
-          rm -rf "${RUNNER_TEMP}/llvm.tar" "${RUNNER_TEMP}/llvm_extract"
-          echo "::endgroup::"
-
-          echo "::group::Create libxml2s.lib stub"
-          # LLVM 预编译库链接时引用 libxml2s.lib，但 TaoLang 不使用 XML 功能。
-          # 创建一个包含空函数的桩库来满足链接器要求。
-          echo "void __libxml2s_stub(void) {}" > stub.c
-          "C:/llvm/bin/clang.exe" -c stub.c -o stub.obj
-          "C:/llvm/bin/llvm-lib.exe" /OUT:"C:/llvm/lib/libxml2s.lib" stub.obj
-          rm -f stub.c stub.obj
-          echo "::endgroup::"
-
-          echo "::notice::LLVM ${LLVM_VERSION} installed to C:/llvm"
-
-      # 步骤 5：缓存 Cargo 依赖和编译产物
       - name: Cache Cargo
         uses: actions/cache@v4
         with:
@@ -138,28 +124,21 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ matrix.llvm_cache_key }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-${{ matrix.llvm_cache_key }}-cargo-
 
-      # 步骤 6：快速编译检查（cargo check）
-      # 只做类型检查和借用检查，不生成二进制文件，速度远快于 build
       - name: Check compilation
         run: cargo check --verbose
 
-      # 步骤 7：运行所有单元测试和集成测试
       - name: Run tests
         run: cargo test --verbose
 
-      # 步骤 8：构建 release 版本
-      # 验证 release profile（fat LTO + codegen-units=1）下也能正常编译
       - name: Build release
         run: cargo build --release --verbose
 
-      # 步骤 9：Clippy 代码质量检查
-      # -D warnings：将所有 warning 提升为 error，强制修复
-      # continue-on-error: true：当前阶段为软性检查，不阻塞合并
-      # TODO: 项目稳定后将 continue-on-error 改为 false
+      # continue-on-error: true — 当前阶段为软性检查
+      # TODO: 项目稳定后改为 false
       - name: Run Clippy
         run: cargo clippy -- -D warnings
         continue-on-error: true
@@ -168,7 +147,6 @@ jobs:
   # 作业 2：代码格式检查 (Rustfmt)
   # =========================================================================
   # 不需要编译代码，也不需要 LLVM 环境，在 Ubuntu 上运行速度最快。
-  # 统一的代码格式有助于减少代码审查中关于风格的讨论、使 git diff 更干净。
   # =========================================================================
   fmt:
     name: Rustfmt
@@ -183,20 +161,12 @@ jobs:
         with:
           components: rustfmt
 
-      # --check 模式：只检查格式，不实际修改文件
-      # 开发者可在本地运行 `cargo fmt` 自动修复格式
-      # continue-on-error: true：当前阶段为软性检查
-      # TODO: 项目稳定后将 continue-on-error 改为 false
       - name: Check formatting
         run: cargo fmt --all -- --check
         continue-on-error: true
 
   # =========================================================================
   # 作业 3：依赖安全审计 (cargo-deny)
-  # =========================================================================
-  # 检查项目依赖中是否存在已知安全漏洞（CVE）。
-  # taoc 依赖 llvm-sys、libc 等 crate，taichi 依赖 serde、toml 等，
-  # 任何一层传递依赖出现漏洞都可能影响项目安全。
   # =========================================================================
   security-audit:
     name: Security Audit
@@ -206,8 +176,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 使用 EmbarkStudios 维护的 cargo-deny action
-      # 仅运行 advisories 检查（已知安全漏洞扫描）
       - name: Run cargo-deny (advisories)
         uses: EmbarkStudios/cargo-deny-action@v2
         with:

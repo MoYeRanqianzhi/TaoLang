@@ -21,14 +21,21 @@ fn main() {
     // 在错误路径上返回的错误消息字符串。
     let llvm_prefix = std::env::var("LLVM_SYS_211_PREFIX")
         .expect("LLVM_SYS_211_PREFIX must be set");
-    let llvm_include = format!("{}\\include", llvm_prefix);
+    // 使用 PathBuf::join 构建跨平台路径（避免 Windows 反斜杠硬编码）
+    let llvm_include = std::path::PathBuf::from(&llvm_prefix).join("include");
 
-    // cc crate 自动设置 MSVC 和 Windows SDK include 路径
-    // 通过 flag("/utf-8") 避免 MSVC 中文代码页警告（C4819）
-    cc::Build::new()
+    // cc crate 自动设置系统编译器的 include 路径
+    let mut build = cc::Build::new();
+    build
         .file("csrc/llvm_string_bridge.c")
         .include(&llvm_include)
-        .flag("/utf-8")
-        .warnings(false)  // 抑制 LLVM 头文件中的 W4 警告
-        .compile("llvm_string_bridge");
+        .warnings(false);  // 抑制 LLVM 头文件中的编译器警告
+
+    // /utf-8 仅 MSVC 需要（避免 C4819 非 Unicode 代码页警告）
+    // 在 GCC/Clang (Linux, macOS) 上此标志不存在，会导致编译错误
+    if target.contains("msvc") {
+        build.flag("/utf-8");
+    }
+
+    build.compile("llvm_string_bridge");
 }

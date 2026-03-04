@@ -65,14 +65,23 @@ fn main() {
                 taoc::driver::EmitMode::Executable
             };
 
-            // 确定输出路径：用户指定 或 输入文件名 + 扩展名（.ll 或 .exe）
+            // 确定输出路径：用户指定 或 输入文件名 + 扩展名（.ll 或平台可执行文件）
             let output = output.unwrap_or_else(|| {
                 let stem = input.file_stem()
                     .expect("input file should have a name")
                     .to_str()
                     .expect("file name should be valid UTF-8");
-                let ext = if emit_ir { "ll" } else { "exe" };
-                PathBuf::from(format!("{}.{}", stem, ext))
+                if emit_ir {
+                    PathBuf::from(format!("{}.ll", stem))
+                } else {
+                    // Windows: "hello.exe", Linux/macOS: "hello"
+                    let mut p = PathBuf::from(stem);
+                    let exe_ext = std::env::consts::EXE_EXTENSION;
+                    if !exe_ext.is_empty() {
+                        p.set_extension(exe_ext);
+                    }
+                    p
+                }
             });
 
             // 执行编译
@@ -89,7 +98,9 @@ fn main() {
                 .expect("input file should have a name")
                 .to_str()
                 .expect("file name should be valid UTF-8");
-            let exe_path = PathBuf::from(format!("{}.exe", stem));
+            // 生成临时可执行文件名（Windows: hello.exe, Unix: hello）
+            let exe_name = format!("{}{}", stem, std::env::consts::EXE_SUFFIX);
+            let exe_path = PathBuf::from(exe_name);
 
             // 编译
             if let Err(e) = taoc::driver::compile(&input, &exe_path, taoc::driver::EmitMode::Executable) {

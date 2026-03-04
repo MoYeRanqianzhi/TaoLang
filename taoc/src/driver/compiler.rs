@@ -8,7 +8,7 @@
 // 插入空间预处理、语义分析、生命周期分析和钩子编织阶段。
 // ============================================================================
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::error::TaoError;
@@ -16,11 +16,41 @@ use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::codegen::CodeGenerator;
 
-/// LLVM 安装路径中的 clang.exe 位置
+/// 查找 clang 可执行文件路径
 ///
-/// 用于将目标文件链接为可执行文件。clang 作为链接器驱动，
-/// 自动发现 MSVC 库和 Windows SDK 路径。
-const CLANG_PATH: &str = r"D:\clang+llvm-21.1.8-x86_64-pc-windows-msvc\bin\clang.exe";
+/// 查找策略（按优先级）：
+///   1. LLVM_SYS_211_PREFIX 环境变量指向的 bin/ 目录下的 clang
+///   2. 系统 PATH 中的 clang
+///
+/// clang 用于将目标文件链接为可执行文件。它作为链接器驱动，
+/// 自动发现系统库路径（Windows: MSVC + Windows SDK; Unix: libc + ld）。
+fn find_clang() -> Result<PathBuf, TaoError> {
+    // clang 可执行文件名：Windows 为 clang.exe，Unix 为 clang
+    let clang_name = if cfg!(target_os = "windows") { "clang.exe" } else { "clang" };
+
+    // 策略 1：从 LLVM_SYS_211_PREFIX 环境变量推导
+    if let Ok(prefix) = std::env::var("LLVM_SYS_211_PREFIX") {
+        let clang_path = Path::new(&prefix).join("bin").join(clang_name);
+        if clang_path.exists() {
+            return Ok(clang_path);
+        }
+    }
+
+    // 策略 2：搜索系统 PATH（验证 clang 是否可执行）
+    if Command::new(clang_name)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok()
+    {
+        return Ok(PathBuf::from(clang_name));
+    }
+
+    Err(TaoError::LinkerError {
+        message: "clang not found. Set LLVM_SYS_211_PREFIX or add clang to PATH.".into(),
+    })
+}
 
 /// 编译输出模式
 ///
@@ -114,8 +144,9 @@ pub fn compile(input: &Path, output: &Path, emit_mode: EmitMode) -> Result<(), T
         }
 
         EmitMode::Executable => {
-            // 发射目标文件（.obj）
-            let obj_path = output.with_extension("obj");
+            // 发射目标文件（Windows: .obj, Unix: .o）
+            let obj_ext = if cfg!(target_os = "windows") { "obj" } else { "o" };
+            let obj_path = output.with_extension(obj_ext);
             codegen.emit_object_file(&obj_path).map_err(|e| {
                 eprintln!("[taoc] Failed to emit object file: {}", e);
                 e
@@ -141,30 +172,20 @@ pub fn compile(input: &Path, output: &Path, emit_mode: EmitMode) -> Result<(), T
 /// 使用 clang 作为链接器驱动，将目标文件链接为可执行文件
 ///
 /// clang 会自动：
-///   - 发现 MSVC 工具链和库路径
-///   - 链接 C 运行时库（msvcrt）
-///   - 提供 mainCRTStartup 入口点（调用我们的 main 函数）
-///   - 处理 Windows SDK 库路径
+///   - 发现系统工具链和库路径（Windows: MSVC; Unix: ld + libc）
+///   - 链接 C 运行时库
+///   - 提供程序入口点（调用我们的 main 函数）
 fn link_with_clang(obj_path: &Path, exe_path: &Path) -> Result<(), TaoError> {
-    // 检查 clang.exe 是否存在
-    let clang = Path::new(CLANG_PATH);
-    if !clang.exists() {
-        return Err(TaoError::LinkerError {
-            message: format!(
-                "clang not found at '{}'. Please verify LLVM installation.",
-                CLANG_PATH
-            ),
-        });
-    }
+    let clang = find_clang()?;
 
     // 调用 clang 进行链接
-    let output = Command::new(clang)
+    let output = Command::new(&clang)
         .arg("-o")
         .arg(exe_path)
         .arg(obj_path)
         .output()
         .map_err(|e| TaoError::LinkerError {
-            message: format!("failed to execute clang: {}", e),
+            message: format!("failed to execute clang at '{}': {}", clang.display(), e),
         })?;
 
     // 检查链接结果

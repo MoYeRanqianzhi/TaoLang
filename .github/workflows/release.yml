@@ -24,17 +24,26 @@
 #      - 在 Actions 页面手动输入 tag 名称触发
 #      - 用于补发遗漏的历史版本或重新构建失败的发布
 #
-# 构建平台：
-#   - x86_64-pc-windows-msvc  (Windows x86_64)
-#   taoc 当前仅支持 Windows 平台（依赖 LLVM 21.1.8 + MSVC 工具链）。
-#   后续支持 Linux/macOS 时在矩阵中添加对应平台即可。
+# 构建平台（4 平台并行构建）：
+#   - Windows x86_64  (windows-latest)
+#   - Linux x86_64    (ubuntu-latest)
+#   - macOS ARM       (macos-latest, Apple Silicon)
+#   - macOS Intel     (macos-13)
+#
+# LLVM 预编译包通过 composite action (.github/actions/setup-llvm) 安装并缓存。
 #
 # 产物命名规则：
-#   - 正式版 release：taoc_<版本号>_x86_64-windows.exe
+#   - 正式版 release：taoc_<版本号>_<平台后缀>[.exe]
 #   - 正式版无 debug 构建
-#   - 预发布 release：taoc_<版本号>+build.<时间戳>_x86_64-windows.exe
-#   - 预发布 debug：  taoc_<版本号>+build.<时间戳>_x86_64-windows-debug.exe
+#   - 预发布 release：taoc_<版本号>+build.<时间戳>_<平台后缀>[.exe]
+#   - 预发布 debug：  taoc_<版本号>+build.<时间戳>_<平台后缀>-debug[.exe]
 #   - taichi 命名规则相同
+#
+# 平台后缀对照：
+#   - x86_64-windows  (Windows, .exe)
+#   - x86_64-linux    (Linux)
+#   - aarch64-macos   (macOS ARM)
+#   - x86_64-macos    (macOS Intel)
 #
 # 质量保障：
 #   本工作流内置了 CI 检查作业（测试 + clippy），作为构建和发布的前置门槛。
@@ -272,13 +281,13 @@ jobs:
   #   - tag 推送和手动触发不会触发 ci.yml
   #   - 如果有人直接在某个未经 CI 的提交上打 tag，没有这道检查就会
   #     直接构建并发布未经验证的代码
+  #
+  # 仅在单一平台（Ubuntu）上运行检查以节约 CI 时间，
+  # 跨平台编译问题由 build 作业的矩阵构建捕获。
   # =========================================================================
   check:
     name: CI Check
-    runs-on: windows-latest
-
-    env:
-      LLVM_SYS_211_PREFIX: "C:\\llvm"
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
@@ -291,38 +300,16 @@ jobs:
         with:
           components: clippy
 
-      # 缓存 LLVM（与 ci.yml 共享相同的缓存键）
-      - name: Cache LLVM
-        id: cache-llvm
-        uses: actions/cache@v4
+      # 安装 LLVM（使用 composite action）
+      - name: Setup LLVM
+        uses: ./.github/actions/setup-llvm
         with:
-          path: C:\llvm
-          key: llvm-${{ env.LLVM_VERSION }}-x86_64-pc-windows-msvc-v1
-
-      - name: Download and install LLVM
-        if: steps.cache-llvm.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          LLVM_URL="https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/clang+llvm-${LLVM_VERSION}-x86_64-pc-windows-msvc.tar.xz"
-          echo "::group::Download LLVM ${LLVM_VERSION}"
-          curl -L --fail --retry 3 -o llvm.tar.xz "$LLVM_URL"
-          echo "::endgroup::"
-
-          echo "::group::Extract LLVM"
-          7z x llvm.tar.xz -o"${RUNNER_TEMP}" -y > /dev/null
-          7z x "${RUNNER_TEMP}/llvm.tar" -o"${RUNNER_TEMP}/llvm_extract" -y > /dev/null
-          mv "${RUNNER_TEMP}/llvm_extract/clang+llvm-${LLVM_VERSION}-x86_64-pc-windows-msvc" \
-            "C:/llvm"
-          rm -f llvm.tar.xz
-          rm -rf "${RUNNER_TEMP}/llvm.tar" "${RUNNER_TEMP}/llvm_extract"
-          echo "::endgroup::"
-
-          echo "::group::Create libxml2s.lib stub"
-          echo "void __libxml2s_stub(void) {}" > stub.c
-          "C:/llvm/bin/clang.exe" -c stub.c -o stub.obj
-          "C:/llvm/bin/llvm-lib.exe" /OUT:"C:/llvm/lib/libxml2s.lib" stub.obj
-          rm -f stub.c stub.obj
-          echo "::endgroup::"
+          llvm-version: ${{ env.LLVM_VERSION }}
+          llvm-package: "clang+llvm-${{ env.LLVM_VERSION }}-x86_64-linux-gnu-ubuntu-24.04"
+          llvm-install: "/opt/llvm"
+          cache-key: "x86_64-linux-gnu"
+          extract-tool: "tar"
+          stub-lib-ext: "a"
 
       - name: Cache Cargo
         uses: actions/cache@v4
@@ -331,9 +318,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-check-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-x86_64-linux-gnu-cargo-check-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-check-
+            ${{ runner.os }}-x86_64-linux-gnu-cargo-check-
 
       # 运行单元测试，确保代码逻辑正确
       - name: Run tests
@@ -348,7 +335,7 @@ jobs:
   # 作业 3：创建 GitHub Release
   # =========================================================================
   # 在构建之前先创建 Release，后续构建作业完成后直接将产物上传到此 Release。
-  # 这样即使构建失败，Release 仍然存在，之前成功上传的产物不会丢失。
+  # 这样即使某个平台构建失败，Release 仍然存在，其他平台的产物不会丢失。
   #
   # 正式版和预发布使用不同的 Release 模板：
   #   - 正式版：包含版本号、变更日志、GitHub 自动生成的 Release Notes
@@ -393,19 +380,23 @@ jobs:
 
             ### 安装方式
 
-            下载对应产物，即可使用：
+            下载对应平台的产物，即可使用：
 
-            | 产物 | 文件 |
-            |------|------|
-            | **taoc 编译器** | `taoc_*_x86_64-windows.exe` |
-            | **taichi 包管理器** | `taichi_*_x86_64-windows.exe` |
+            | 平台 | taoc 编译器 | taichi 包管理器 |
+            |------|-------------|-----------------|
+            | **Windows x86_64** | `taoc_*_x86_64-windows.exe` | `taichi_*_x86_64-windows.exe` |
+            | **Linux x86_64** | `taoc_*_x86_64-linux` | `taichi_*_x86_64-linux` |
+            | **macOS ARM (Apple Silicon)** | `taoc_*_aarch64-macos` | `taichi_*_aarch64-macos` |
+            | **macOS Intel** | `taoc_*_x86_64-macos` | `taichi_*_x86_64-macos` |
 
-            ```powershell
+            ```bash
             # 编译 TaoLang 源文件
-            .\taoc.exe build hello.tao
+            taoc build hello.tao
             # 运行 TaoLang 程序
-            .\taoc.exe run hello.tao
+            taoc run hello.tao
             ```
+
+            > **注意：** Linux/macOS 用户下载后需赋予执行权限：`chmod +x taoc`
 
             ---
             *完整变更日志见下方 GitHub 自动生成的内容。*
@@ -439,12 +430,23 @@ jobs:
 
             ### 产物说明
 
-            | 类型 | 文件 | 说明 |
-            |------|------|------|
-            | **Release** | `taoc_*_x86_64-windows.exe` | 优化编译版本（性能最优） |
-            | **Release** | `taichi_*_x86_64-windows.exe` | 优化编译版本（性能最优） |
-            | **Debug** | `taoc_*_x86_64-windows-debug.exe` | 含调试信息版本（支持 backtrace） |
-            | **Debug** | `taichi_*_x86_64-windows-debug.exe` | 含调试信息版本（支持 backtrace） |
+            **Release 构建**（性能优化版本）：
+
+            | 平台 | taoc 编译器 | taichi 包管理器 |
+            |------|-------------|-----------------|
+            | **Windows x86_64** | `taoc_*_x86_64-windows.exe` | `taichi_*_x86_64-windows.exe` |
+            | **Linux x86_64** | `taoc_*_x86_64-linux` | `taichi_*_x86_64-linux` |
+            | **macOS ARM** | `taoc_*_aarch64-macos` | `taichi_*_aarch64-macos` |
+            | **macOS Intel** | `taoc_*_x86_64-macos` | `taichi_*_x86_64-macos` |
+
+            **Debug 构建**（含调试信息，支持 backtrace，文件名带 `-debug` 后缀）：
+
+            | 平台 | taoc 编译器 | taichi 包管理器 |
+            |------|-------------|-----------------|
+            | **Windows x86_64** | `taoc_*_x86_64-windows-debug.exe` | `taichi_*_x86_64-windows-debug.exe` |
+            | **Linux x86_64** | `taoc_*_x86_64-linux-debug` | `taichi_*_x86_64-linux-debug` |
+            | **macOS ARM** | `taoc_*_aarch64-macos-debug` | `taichi_*_aarch64-macos-debug` |
+            | **macOS Intel** | `taoc_*_x86_64-macos-debug` | `taichi_*_x86_64-macos-debug` |
 
             ### 变更记录
 
@@ -452,10 +454,12 @@ jobs:
           make_latest: false
 
   # =========================================================================
-  # 作业 4：构建并上传产物
+  # 作业 4：跨平台构建并上传产物
   # =========================================================================
-  # 在 Windows 上构建 taoc 和 taichi 的 release 版本。
+  # 在 4 个平台上并行构建 taoc 和 taichi 的 release 版本。
   # 预发布时额外构建 debug 版本（通过 -debug 后缀区分）。
+  #
+  # LLVM 安装通过 composite action 统一处理，各平台差异封装在矩阵变量中。
   #
   # 构建配置说明（来自 Cargo.toml [profile.release]）：
   #   - opt-level = 3     — 最高优化等级
@@ -470,14 +474,56 @@ jobs:
   #   - 第三方依赖以 O2 编译
   # =========================================================================
   build:
-    name: Build (x86_64-windows)
+    name: Build (${{ matrix.asset_suffix }})
     needs: [prepare, check, create-release]
-    runs-on: windows-latest
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: write
 
-    env:
-      LLVM_SYS_211_PREFIX: "C:\\llvm"
+    strategy:
+      # 某个平台失败不影响其他平台，一次性发现所有问题
+      fail-fast: false
+      matrix:
+        include:
+          # Windows x86_64
+          - runner: windows-latest
+            llvm_package: "clang+llvm-21.1.8-x86_64-pc-windows-msvc"
+            llvm_install: "C:/llvm"
+            llvm_cache_key: "x86_64-pc-windows-msvc"
+            extract_tool: "7z"
+            stub_lib_ext: "lib"
+            asset_suffix: "x86_64-windows"
+            exe_ext: ".exe"
+
+          # Linux x86_64
+          - runner: ubuntu-latest
+            llvm_package: "clang+llvm-21.1.8-x86_64-linux-gnu-ubuntu-24.04"
+            llvm_install: "/opt/llvm"
+            llvm_cache_key: "x86_64-linux-gnu"
+            extract_tool: "tar"
+            stub_lib_ext: "a"
+            asset_suffix: "x86_64-linux"
+            exe_ext: ""
+
+          # macOS ARM (Apple Silicon)
+          - runner: macos-latest
+            llvm_package: "clang+llvm-21.1.8-arm64-apple-darwin"
+            llvm_install: "/opt/llvm"
+            llvm_cache_key: "arm64-apple-darwin"
+            extract_tool: "tar"
+            stub_lib_ext: "a"
+            asset_suffix: "aarch64-macos"
+            exe_ext: ""
+
+          # macOS Intel
+          - runner: macos-13
+            llvm_package: "clang+llvm-21.1.8-x86_64-apple-darwin"
+            llvm_install: "/opt/llvm"
+            llvm_cache_key: "x86_64-apple-darwin"
+            extract_tool: "tar"
+            stub_lib_ext: "a"
+            asset_suffix: "x86_64-macos"
+            exe_ext: ""
 
     steps:
       # 检出对应的代码版本
@@ -490,38 +536,16 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      # 缓存 LLVM（与 ci.yml 和 check 作业共享相同的缓存键）
-      - name: Cache LLVM
-        id: cache-llvm
-        uses: actions/cache@v4
+      # 安装 LLVM（使用 composite action，封装下载/缓存/解压/桩库逻辑）
+      - name: Setup LLVM
+        uses: ./.github/actions/setup-llvm
         with:
-          path: C:\llvm
-          key: llvm-${{ env.LLVM_VERSION }}-x86_64-pc-windows-msvc-v1
-
-      - name: Download and install LLVM
-        if: steps.cache-llvm.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          LLVM_URL="https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/clang+llvm-${LLVM_VERSION}-x86_64-pc-windows-msvc.tar.xz"
-          echo "::group::Download LLVM ${LLVM_VERSION}"
-          curl -L --fail --retry 3 -o llvm.tar.xz "$LLVM_URL"
-          echo "::endgroup::"
-
-          echo "::group::Extract LLVM"
-          7z x llvm.tar.xz -o"${RUNNER_TEMP}" -y > /dev/null
-          7z x "${RUNNER_TEMP}/llvm.tar" -o"${RUNNER_TEMP}/llvm_extract" -y > /dev/null
-          mv "${RUNNER_TEMP}/llvm_extract/clang+llvm-${LLVM_VERSION}-x86_64-pc-windows-msvc" \
-            "C:/llvm"
-          rm -f llvm.tar.xz
-          rm -rf "${RUNNER_TEMP}/llvm.tar" "${RUNNER_TEMP}/llvm_extract"
-          echo "::endgroup::"
-
-          echo "::group::Create libxml2s.lib stub"
-          echo "void __libxml2s_stub(void) {}" > stub.c
-          "C:/llvm/bin/clang.exe" -c stub.c -o stub.obj
-          "C:/llvm/bin/llvm-lib.exe" /OUT:"C:/llvm/lib/libxml2s.lib" stub.obj
-          rm -f stub.c stub.obj
-          echo "::endgroup::"
+          llvm-version: ${{ env.LLVM_VERSION }}
+          llvm-package: ${{ matrix.llvm_package }}
+          llvm-install: ${{ matrix.llvm_install }}
+          cache-key: ${{ matrix.llvm_cache_key }}
+          extract-tool: ${{ matrix.extract_tool }}
+          stub-lib-ext: ${{ matrix.stub_lib_ext }}
 
       # 缓存 Cargo 依赖和编译产物
       - name: Cache Cargo
@@ -531,9 +555,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-${{ matrix.llvm_cache_key }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-release-
+            ${{ runner.os }}-${{ matrix.llvm_cache_key }}-cargo-release-
 
       # -------------------------------------------------------------------
       # 构建 release 版本（始终执行）
@@ -555,14 +579,14 @@ jobs:
       # 收集构建产物
       # -------------------------------------------------------------------
       # 重命名规则：
-      #   <crate>_<artifact_version>_x86_64-windows.exe          (release)
-      #   <crate>_<artifact_version>_x86_64-windows-debug.exe    (debug, 仅预发布)
+      #   <crate>_<artifact_version>_<asset_suffix>[.exe]           (release)
+      #   <crate>_<artifact_version>_<asset_suffix>-debug[.exe]     (debug, 仅预发布)
       #
-      # 示例（正式版）：
-      #   taoc_0.1.0_x86_64-windows.exe
-      #   taichi_0.1.0_x86_64-windows.exe
+      # 示例（正式版，Linux）：
+      #   taoc_0.1.0_x86_64-linux
+      #   taichi_0.1.0_x86_64-linux
       #
-      # 示例（预发布）：
+      # 示例（预发布，Windows）：
       #   taoc_0.1.0+build.20260304120000_x86_64-windows.exe
       #   taoc_0.1.0+build.20260304120000_x86_64-windows-debug.exe
       #   taichi_0.1.0+build.20260304120000_x86_64-windows.exe
@@ -573,23 +597,25 @@ jobs:
         run: |
           VERSION="${{ needs.prepare.outputs.artifact_version }}"
           IS_RELEASE="${{ needs.prepare.outputs.is_release }}"
+          SUFFIX="${{ matrix.asset_suffix }}"
+          EXT="${{ matrix.exe_ext }}"
 
           mkdir -p upload
 
           # Release 构建（始终收集）
-          cp target/release/taoc.exe   "upload/taoc_${VERSION}_x86_64-windows.exe"
-          cp target/release/taichi.exe "upload/taichi_${VERSION}_x86_64-windows.exe"
-          echo "::notice::Release artifacts collected"
+          cp "target/release/taoc${EXT}"   "upload/taoc_${VERSION}_${SUFFIX}${EXT}"
+          cp "target/release/taichi${EXT}" "upload/taichi_${VERSION}_${SUFFIX}${EXT}"
+          echo "::notice::Release artifacts collected for ${SUFFIX}"
 
           # Debug 构建（仅预发布）
           if [ "$IS_RELEASE" = "false" ]; then
-            cp target/debug/taoc.exe   "upload/taoc_${VERSION}_x86_64-windows-debug.exe"
-            cp target/debug/taichi.exe "upload/taichi_${VERSION}_x86_64-windows-debug.exe"
-            echo "::notice::Debug artifacts collected"
+            cp "target/debug/taoc${EXT}"   "upload/taoc_${VERSION}_${SUFFIX}-debug${EXT}"
+            cp "target/debug/taichi${EXT}" "upload/taichi_${VERSION}_${SUFFIX}-debug${EXT}"
+            echo "::notice::Debug artifacts collected for ${SUFFIX}"
           fi
 
           # 打印产物列表和大小
-          echo "--- Artifacts ---"
+          echo "--- Artifacts for ${SUFFIX} ---"
           ls -lh upload/
 
       # 将构建产物上传到之前创建的 GitHub Release

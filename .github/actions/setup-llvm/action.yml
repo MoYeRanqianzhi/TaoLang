@@ -1,0 +1,120 @@
+# =============================================================================
+# setup-llvm — 可复用的 LLVM 安装 composite action
+# =============================================================================
+#
+# 封装 LLVM 预编译包的下载、缓存、解压和桩库创建，
+# 消除 ci.yml 和 release.yml 中的重复代码。
+#
+# 支持平台：
+#   - Windows (7z 解压, llvm-lib.exe 创建 .lib 桩)
+#   - Linux/macOS (tar 解压, ar 创建 .a 桩)
+#
+# 使用方式：
+#   - uses: ./.github/actions/setup-llvm
+#     with:
+#       llvm-version: "21.1.8"
+#       llvm-package: "clang+llvm-21.1.8-x86_64-pc-windows-msvc"
+#       llvm-install: "C:/llvm"
+#       cache-key: "x86_64-pc-windows-msvc"
+#       extract-tool: "7z"
+#       stub-lib-ext: "lib"
+# =============================================================================
+
+name: Setup LLVM
+description: Download, cache, and install LLVM prebuilt for the target platform
+
+inputs:
+  llvm-version:
+    description: 'LLVM version (e.g. 21.1.8)'
+    required: true
+  llvm-package:
+    description: 'LLVM package name without .tar.xz (e.g. clang+llvm-21.1.8-x86_64-pc-windows-msvc)'
+    required: true
+  llvm-install:
+    description: 'Installation directory (e.g. C:/llvm or /opt/llvm)'
+    required: true
+  cache-key:
+    description: 'Cache key suffix for this platform (e.g. x86_64-pc-windows-msvc)'
+    required: true
+  extract-tool:
+    description: 'Extraction tool: "7z" for Windows, "tar" for Linux/macOS'
+    required: true
+  stub-lib-ext:
+    description: 'Stub library extension: "lib" for Windows, "a" for Linux/macOS'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    # 缓存 LLVM 安装目录
+    # LLVM 预编译包解压后约 3GB，首次下载和解压需要数分钟。
+    # 缓存键包含 LLVM 版本号和平台标识，版本更新时自动失效。
+    - name: Cache LLVM
+      id: cache-llvm
+      uses: actions/cache@v4
+      with:
+        path: ${{ inputs.llvm-install }}
+        key: llvm-${{ inputs.llvm-version }}-${{ inputs.cache-key }}-v1
+
+    # 下载并安装 LLVM（仅在缓存未命中时执行）
+    - name: Download and install LLVM
+      if: steps.cache-llvm.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        LLVM_URL="https://github.com/llvm/llvm-project/releases/download/llvmorg-${{ inputs.llvm-version }}/${{ inputs.llvm-package }}.tar.xz"
+        echo "::group::Download LLVM ${{ inputs.llvm-version }}"
+        curl -L --fail --retry 3 -o llvm.tar.xz "$LLVM_URL"
+        echo "::endgroup::"
+
+        echo "::group::Extract LLVM"
+        if [ "${{ inputs.extract-tool }}" = "7z" ]; then
+          # Windows: 内置 tar 不支持 xz，使用 7z 两步解压
+          #   1. 解压 .xz → .tar（输出文件名为 llvm.tar）
+          #   2. 解压 .tar → 目录
+          7z x llvm.tar.xz -o"${RUNNER_TEMP}" -y > /dev/null
+          7z x "${RUNNER_TEMP}/llvm.tar" -o"${RUNNER_TEMP}/llvm_extract" -y > /dev/null
+        else
+          # Linux/macOS: 系统 tar 原生支持 xz 解压
+          mkdir -p "${RUNNER_TEMP}/llvm_extract"
+          tar xf llvm.tar.xz -C "${RUNNER_TEMP}/llvm_extract"
+        fi
+
+        # 移动到最终安装路径
+        INSTALL_DIR="${{ inputs.llvm-install }}"
+        if [ "${{ runner.os }}" = "Windows" ]; then
+          mv "${RUNNER_TEMP}/llvm_extract/${{ inputs.llvm-package }}" "$INSTALL_DIR"
+        else
+          # Linux/macOS: /opt 需要 sudo 权限
+          sudo mkdir -p "$(dirname "$INSTALL_DIR")"
+          sudo mv "${RUNNER_TEMP}/llvm_extract/${{ inputs.llvm-package }}" "$INSTALL_DIR"
+        fi
+
+        # 清理临时文件
+        rm -f llvm.tar.xz
+        rm -rf "${RUNNER_TEMP}/llvm.tar" "${RUNNER_TEMP}/llvm_extract"
+        echo "::endgroup::"
+
+        echo "::group::Create libxml2 stub library"
+        # LLVM 预编译库链接时可能引用 libxml2，但 TaoLang 不使用 XML 功能。
+        # 创建一个包含空函数的桩库来满足链接器要求（无害，即使不需要也不影响）。
+        echo "void __libxml2s_stub(void) {}" > stub.c
+        if [ "${{ inputs.stub-lib-ext }}" = "lib" ]; then
+          # Windows: 使用 LLVM 自带的工具创建 .lib
+          "$INSTALL_DIR/bin/clang.exe" -c stub.c -o stub.obj
+          "$INSTALL_DIR/bin/llvm-lib.exe" /OUT:"$INSTALL_DIR/lib/libxml2s.lib" stub.obj
+          rm -f stub.obj
+        else
+          # Linux/macOS: 使用 LLVM clang + ar 创建 .a
+          "$INSTALL_DIR/bin/clang" -c stub.c -o stub.o
+          ar rcs "$INSTALL_DIR/lib/libxml2s.a" stub.o
+          rm -f stub.o
+        fi
+        rm -f stub.c
+        echo "::endgroup::"
+
+        echo "::notice::LLVM ${{ inputs.llvm-version }} installed to $INSTALL_DIR"
+
+    # 设置 LLVM_SYS_211_PREFIX 环境变量，供后续 cargo 步骤使用
+    - name: Set LLVM environment variable
+      shell: bash
+      run: echo "LLVM_SYS_211_PREFIX=${{ inputs.llvm-install }}" >> "$GITHUB_ENV"
