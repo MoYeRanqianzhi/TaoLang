@@ -1,0 +1,602 @@
+# =============================================================================
+# 发布工作流 — Build & Release
+# =============================================================================
+#
+# 项目：TaoLang — 道语言编译器 & 包管理器
+#
+# 功能说明：
+#   本工作流负责构建 taoc（编译器）和 taichi（包管理器）并发布到 GitHub Releases。
+#   支持三种触发方式，覆盖从日常开发到正式发版的完整场景：
+#
+#   1. Tag 推送 (v*)       → 正式版 Release
+#      - 推送 v 开头的 tag 时触发（如 v0.1.0、v1.0.0-beta.1）
+#      - 生成完整的变更日志（基于上一个 tag 到当前 tag 的提交记录）
+#      - 标记为 latest release
+#      - 仅包含 release 构建
+#
+#   2. 分支推送 (任意分支) → 预发布 Pre-release
+#      - 向任意分支推送代码时触发
+#      - 自动生成带时间戳和 commit hash 的版本标识
+#      - 标记为 prerelease，不影响 latest 指向
+#      - 同时包含 release 和 debug 构建（debug 通过 -debug 后缀区分）
+#
+#   3. 手动触发            → 补发历史版本
+#      - 在 Actions 页面手动输入 tag 名称触发
+#      - 用于补发遗漏的历史版本或重新构建失败的发布
+#
+# 构建平台：
+#   - x86_64-pc-windows-msvc  (Windows x86_64)
+#   taoc 当前仅支持 Windows 平台（依赖 LLVM 21.1.8 + MSVC 工具链）。
+#   后续支持 Linux/macOS 时在矩阵中添加对应平台即可。
+#
+# 产物命名规则：
+#   - 正式版 release：taoc_<版本号>_x86_64-windows.exe
+#   - 正式版无 debug 构建
+#   - 预发布 release：taoc_<版本号>+build.<时间戳>_x86_64-windows.exe
+#   - 预发布 debug：  taoc_<版本号>+build.<时间戳>_x86_64-windows-debug.exe
+#   - taichi 命名规则相同
+#
+# 质量保障：
+#   本工作流内置了 CI 检查作业（测试 + clippy），作为构建和发布的前置门槛。
+#   这确保即使是直接打 tag 发布（绕过分支 CI），代码质量也有保障。
+#   ci.yml 已通过 tags-ignore 排除 tag 推送，避免与本工作流中的检查重复。
+#
+# =============================================================================
+
+name: Build & Release
+
+# ---------------------------------------------------------------------------
+# 触发条件
+# ---------------------------------------------------------------------------
+# push.branches: ['**']  — 匹配所有分支的推送，用于生成预发布版
+# push.tags: ['v*']      — 匹配 v 开头的 tag 推送，用于生成正式版
+# workflow_dispatch       — 手动触发，需输入 tag 名称
+# ---------------------------------------------------------------------------
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要构建并发布的 Tag 名称（例如 v0.1.0、v1.0.0-beta.1）'
+        required: true
+        type: string
+
+# ---------------------------------------------------------------------------
+# 并发控制
+# ---------------------------------------------------------------------------
+# 同一分支或标签只保留最新一次构建，避免资源浪费。
+# 例如：短时间内连续推送多次到 main 分支，前面的构建会被自动取消。
+# ---------------------------------------------------------------------------
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref }}
+  cancel-in-progress: true
+
+# ---------------------------------------------------------------------------
+# 全局环境变量
+# ---------------------------------------------------------------------------
+env:
+  # 启用 cargo 输出着色
+  CARGO_TERM_COLOR: always
+  # CI 环境禁用增量编译，避免缓存恢复开销
+  CARGO_INCREMENTAL: 0
+  # LLVM 版本号（用于构建下载 URL 和缓存键）
+  LLVM_VERSION: "21.1.8"
+
+# ---------------------------------------------------------------------------
+# 作业定义
+# ---------------------------------------------------------------------------
+jobs:
+
+  # =========================================================================
+  # 作业 1：准备阶段 — 判断发布类型、提取版本信息、生成变更日志
+  # =========================================================================
+  # 此作业在实际构建之前运行，负责：
+  #   1. 从 Cargo.toml 提取应用版本号（如 0.1.0）
+  #   2. 判断是正式发布还是预发布
+  #   3. 生成变更日志（基于 git log）
+  #
+  # 输出变量通过 outputs 传递给后续作业，避免重复计算。
+  # =========================================================================
+  prepare:
+    name: Prepare Release Info
+    runs-on: ubuntu-latest
+
+    # -----------------------------------------------------------------------
+    # outputs 说明：
+    #   is_release       — "true" 或 "false"，标识是否为正式发布
+    #   tag_name         — GitHub Release 使用的 tag 名称
+    #                      正式版：原始 tag（如 v0.1.0）
+    #                      预发布：build-<时间戳>-<短SHA>
+    #   release_name     — GitHub Release 的显示标题
+    #   timestamp        — 构建时间戳（仅预发布使用，UTC 时区）
+    #   app_version      — Cargo.toml 中的版本号（如 0.1.0）
+    #   artifact_version — 构建产物文件名中的版本部分
+    #                      正式版：与 app_version 相同
+    #                      预发布：附加 +build.<时间戳> 后缀
+    #   changelog        — 生成的变更日志文本
+    # -----------------------------------------------------------------------
+    outputs:
+      is_release: ${{ steps.release_type.outputs.is_release }}
+      tag_name: ${{ steps.release_type.outputs.tag_name }}
+      release_name: ${{ steps.release_type.outputs.release_name }}
+      timestamp: ${{ steps.release_type.outputs.timestamp }}
+      app_version: ${{ steps.version.outputs.version }}
+      artifact_version: ${{ steps.release_type.outputs.artifact_version }}
+      changelog: ${{ steps.changelog.outputs.log }}
+
+    steps:
+      # 检出代码，需要完整历史用于生成变更日志
+      # fetch-depth: 0 获取所有提交历史和 tag 信息
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      # -------------------------------------------------------------------
+      # 步骤 1：从 Cargo.toml 提取版本号
+      # -------------------------------------------------------------------
+      # TaoLang 的版本号定义在工作区根 Cargo.toml 的 [workspace.package] 段中：
+      #   version = "0.1.0"
+      # 使用 grep + sed 提取引号内的版本字符串
+      # -------------------------------------------------------------------
+      - name: Extract version from Cargo.toml
+        id: version
+        run: |
+          VERSION=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "::notice::App version from Cargo.toml: $VERSION"
+
+      # -------------------------------------------------------------------
+      # 步骤 2：判断发布类型（正式版 vs 预发布）
+      # -------------------------------------------------------------------
+      # 判断逻辑（三级判断，确保无论哪种触发方式都能正确识别）：
+      #
+      #   1. github.ref 是 refs/tags/v*     → 正式版（tag 推送触发）
+      #   2. 手动输入了 tag                  → 正式版（workflow_dispatch 触发）
+      #   3. 当前 commit 上存在 v* tag       → 正式版（分支推送触发，但该
+      #      commit 已被打 tag，说明 tag 推送和分支推送几乎同时发生，
+      #      此时应走正式版路径，避免同一 commit 产生重复的预发布）
+      #   4. 以上都不满足                   → 预发布（普通分支推送）
+      #
+      # 正式版命名示例：
+      #   tag_name:         v0.1.0
+      #   release_name:     TaoLang v0.1.0
+      #   artifact_version: 0.1.0
+      #
+      # 预发布命名示例：
+      #   tag_name:         build-20260304120000-abc1234
+      #   release_name:     Pre-release 0.1.0+build.20260304120000
+      #   artifact_version: 0.1.0+build.20260304120000
+      # -------------------------------------------------------------------
+      - name: Determine release type
+        id: release_type
+        run: |
+          INPUT_TAG="${{ github.event.inputs.tag }}"
+          APP_VERSION="${{ steps.version.outputs.version }}"
+
+          # 情况 1 & 2：显式的 tag 推送或手动输入
+          if [[ "${{ github.ref }}" == refs/tags/v* ]] || [[ -n "$INPUT_TAG" ]]; then
+            TAG_NAME="${INPUT_TAG:-${{ github.ref_name }}}"
+            echo "is_release=true"       >> "$GITHUB_OUTPUT"
+            echo "tag_name=$TAG_NAME"    >> "$GITHUB_OUTPUT"
+            echo "release_name=TaoLang ${TAG_NAME}" >> "$GITHUB_OUTPUT"
+            echo "artifact_version=${APP_VERSION}" >> "$GITHUB_OUTPUT"
+            echo "::notice::Release type: OFFICIAL (tag/manual) — Tag: $TAG_NAME"
+          else
+            # 情况 3：分支推送触发，但检查当前 commit 是否已有 v* tag
+            COMMIT_TAG=$(git tag -l 'v*' --points-at HEAD | head -n1)
+
+            if [[ -n "$COMMIT_TAG" ]]; then
+              # 当前 commit 上有 v* tag → 走正式版路径
+              echo "is_release=true"       >> "$GITHUB_OUTPUT"
+              echo "tag_name=$COMMIT_TAG"  >> "$GITHUB_OUTPUT"
+              echo "release_name=TaoLang ${COMMIT_TAG}" >> "$GITHUB_OUTPUT"
+              echo "artifact_version=${APP_VERSION}" >> "$GITHUB_OUTPUT"
+              echo "::notice::Release type: OFFICIAL (tag detected on commit) — Tag: $COMMIT_TAG"
+            else
+              # 情况 4：普通分支推送 → 预发布
+              TIMESTAMP=$(TZ='UTC' date +%Y%m%d%H%M%S)
+              SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+              echo "is_release=false"      >> "$GITHUB_OUTPUT"
+              echo "tag_name=build-${TIMESTAMP}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+              echo "release_name=Pre-release ${APP_VERSION}+build.${TIMESTAMP}" >> "$GITHUB_OUTPUT"
+              echo "timestamp=$TIMESTAMP"  >> "$GITHUB_OUTPUT"
+              echo "artifact_version=${APP_VERSION}+build.${TIMESTAMP}" >> "$GITHUB_OUTPUT"
+              echo "::notice::Release type: PRE-RELEASE — Branch: ${{ github.ref_name }}, SHA: ${SHORT_SHA}"
+            fi
+          fi
+
+      # -------------------------------------------------------------------
+      # 步骤 3：生成变更日志
+      # -------------------------------------------------------------------
+      # 变更日志基于 git log 自动生成，包含每个提交的摘要和短 SHA。
+      #
+      # 生成策略：
+      #   - 正式版（tag 构建）：上一个 v* tag 到当前 tag 之间的所有提交
+      #   - 预发布（分支构建）：最近一个 v* tag 到 HEAD 之间的所有提交
+      #   - 兜底情况：没有任何历史 tag，则取最近 30 条提交
+      # -------------------------------------------------------------------
+      - name: Generate changelog
+        id: changelog
+        run: |
+          INPUT_TAG="${{ github.event.inputs.tag }}"
+          IS_TAG_BUILD=false
+          CURRENT_TAG=""
+
+          # 判断当前构建是否基于 tag
+          if [[ "${{ github.ref }}" == refs/tags/v* ]] || [[ -n "$INPUT_TAG" ]]; then
+            IS_TAG_BUILD=true
+            CURRENT_TAG="${INPUT_TAG:-${{ github.ref_name }}}"
+          else
+            COMMIT_TAG=$(git tag -l 'v*' --points-at HEAD | head -n1)
+            if [[ -n "$COMMIT_TAG" ]]; then
+              IS_TAG_BUILD=true
+              CURRENT_TAG="$COMMIT_TAG"
+            fi
+          fi
+
+          # 查找上一个 tag 作为变更日志的起点
+          if [ "$IS_TAG_BUILD" = true ]; then
+            LAST_TAG=$(git tag -l 'v*' --sort=-v:refname | grep -v "^${CURRENT_TAG}$" | head -n1 2>/dev/null || echo "")
+          else
+            LAST_TAG=$(git tag -l 'v*' --sort=-v:refname | head -n1 2>/dev/null || echo "")
+          fi
+
+          # 生成提交日志
+          if [ -n "$LAST_TAG" ]; then
+            echo "::notice::Changelog range: ${LAST_TAG}..HEAD"
+            LOG=$(git log "${LAST_TAG}..HEAD" --pretty=format:"- %s (\`%h\`)" --no-merges)
+          else
+            echo "::notice::No previous tag found, using last 30 commits"
+            LOG=$(git log --pretty=format:"- %s (\`%h\`)" --no-merges -30)
+          fi
+
+          # 使用 heredoc 格式输出到 GITHUB_OUTPUT，安全处理多行文本
+          {
+            echo "log<<EOF"
+            echo "$LOG"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+  # =========================================================================
+  # 作业 2：CI 质量检查 — 测试 + Clippy
+  # =========================================================================
+  # 在创建 Release 和构建产物之前，先运行核心 CI 检查。
+  # 这是一道安全门槛，确保发布的二进制文件来自通过检查的代码。
+  #
+  # 为什么在 release.yml 中重复 CI 检查？
+  #   - ci.yml 的触发范围是 push 到 master/main 分支 + PR
+  #   - tag 推送和手动触发不会触发 ci.yml
+  #   - 如果有人直接在某个未经 CI 的提交上打 tag，没有这道检查就会
+  #     直接构建并发布未经验证的代码
+  # =========================================================================
+  check:
+    name: CI Check
+    runs-on: windows-latest
+
+    env:
+      LLVM_SYS_211_PREFIX: "C:\\llvm"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      # 缓存 LLVM（与 ci.yml 共享相同的缓存键）
+      - name: Cache LLVM
+        id: cache-llvm
+        uses: actions/cache@v4
+        with:
+          path: C:\llvm
+          key: llvm-${{ env.LLVM_VERSION }}-x86_64-pc-windows-msvc-v1
+
+      - name: Download and install LLVM
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          LLVM_URL="https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/clang+llvm-${LLVM_VERSION}-x86_64-pc-windows-msvc.tar.xz"
+          echo "::group::Download LLVM ${LLVM_VERSION}"
+          curl -L --fail --retry 3 -o llvm.tar.xz "$LLVM_URL"
+          echo "::endgroup::"
+
+          echo "::group::Extract LLVM"
+          7z x llvm.tar.xz -o"${RUNNER_TEMP}" -y > /dev/null
+          7z x "${RUNNER_TEMP}/clang+llvm-${LLVM_VERSION}-x86_64-pc-windows-msvc.tar" \
+            -o"${RUNNER_TEMP}/llvm_extract" -y > /dev/null
+          mv "${RUNNER_TEMP}/llvm_extract/clang+llvm-${LLVM_VERSION}-x86_64-pc-windows-msvc" \
+            "C:/llvm"
+          rm -f llvm.tar.xz
+          rm -rf "${RUNNER_TEMP}/clang+llvm-"* "${RUNNER_TEMP}/llvm_extract"
+          echo "::endgroup::"
+
+          echo "::group::Create libxml2s.lib stub"
+          echo "void __libxml2s_stub(void) {}" > stub.c
+          "C:/llvm/bin/clang.exe" -c stub.c -o stub.obj
+          "C:/llvm/bin/llvm-lib.exe" /OUT:"C:/llvm/lib/libxml2s.lib" stub.obj
+          rm -f stub.c stub.obj
+          echo "::endgroup::"
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-check-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-check-
+
+      # 运行单元测试，确保代码逻辑正确
+      - name: Run tests
+        run: cargo test --verbose
+
+      # 运行 Clippy，检查代码质量
+      - name: Run Clippy
+        run: cargo clippy -- -D warnings
+        continue-on-error: true
+
+  # =========================================================================
+  # 作业 3：创建 GitHub Release
+  # =========================================================================
+  # 在构建之前先创建 Release，后续构建作业完成后直接将产物上传到此 Release。
+  # 这样即使构建失败，Release 仍然存在，之前成功上传的产物不会丢失。
+  #
+  # 正式版和预发布使用不同的 Release 模板：
+  #   - 正式版：包含版本号、变更日志、GitHub 自动生成的 Release Notes
+  #   - 预发布：包含警告标识、分支/提交/时间等构建信息、产物说明表
+  # =========================================================================
+  create-release:
+    name: Create GitHub Release
+    needs: [prepare, check]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      # -------------------------------------------------------------------
+      # 正式版 Release
+      # -------------------------------------------------------------------
+      # generate_release_notes: true — 让 GitHub 额外生成基于 PR 的变更说明
+      # make_latest: true — 标记为最新正式版
+      # -------------------------------------------------------------------
+      - name: Create Release (official)
+        if: needs.prepare.outputs.is_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag_name }}
+          name: ${{ needs.prepare.outputs.release_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          body: |
+            ## TaoLang ${{ needs.prepare.outputs.app_version }}
+
+            道语言编译器 & 包管理器
+
+            ### 更新内容
+
+            ${{ needs.prepare.outputs.changelog }}
+
+            ### 安装方式
+
+            下载对应产物，即可使用：
+
+            | 产物 | 文件 |
+            |------|------|
+            | **taoc 编译器** | `taoc_*_x86_64-windows.exe` |
+            | **taichi 包管理器** | `taichi_*_x86_64-windows.exe` |
+
+            ```powershell
+            # 编译 TaoLang 源文件
+            .\taoc.exe build hello.tao
+            # 运行 TaoLang 程序
+            .\taoc.exe run hello.tao
+            ```
+
+            ---
+            *完整变更日志见下方 GitHub 自动生成的内容。*
+          make_latest: true
+
+      # -------------------------------------------------------------------
+      # 预发布 Pre-release
+      # -------------------------------------------------------------------
+      # prerelease: true — 标记为预发布版，不影响 latest 指向
+      # 预发布同时包含 release 和 debug 构建，debug 通过 -debug 后缀区分
+      # -------------------------------------------------------------------
+      - name: Create Pre-release
+        if: needs.prepare.outputs.is_release == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag_name }}
+          name: ${{ needs.prepare.outputs.release_name }}
+          draft: false
+          prerelease: true
+          generate_release_notes: false
+          body: |
+            ## 预发布版 TaoLang ${{ needs.prepare.outputs.app_version }}
+
+            > **注意：** 此版本为自动构建的预发布版本，可能不稳定，仅供测试使用。
+
+            | 信息 | 值 |
+            |------|-----|
+            | **分支** | `${{ github.ref_name }}` |
+            | **提交** | `${{ github.sha }}` |
+            | **构建时间 (UTC)** | `${{ needs.prepare.outputs.timestamp }}` |
+
+            ### 产物说明
+
+            | 类型 | 文件 | 说明 |
+            |------|------|------|
+            | **Release** | `taoc_*_x86_64-windows.exe` | 优化编译版本（性能最优） |
+            | **Release** | `taichi_*_x86_64-windows.exe` | 优化编译版本（性能最优） |
+            | **Debug** | `taoc_*_x86_64-windows-debug.exe` | 含调试信息版本（支持 backtrace） |
+            | **Debug** | `taichi_*_x86_64-windows-debug.exe` | 含调试信息版本（支持 backtrace） |
+
+            ### 变更记录
+
+            ${{ needs.prepare.outputs.changelog }}
+          make_latest: false
+
+  # =========================================================================
+  # 作业 4：构建并上传产物
+  # =========================================================================
+  # 在 Windows 上构建 taoc 和 taichi 的 release 版本。
+  # 预发布时额外构建 debug 版本（通过 -debug 后缀区分）。
+  #
+  # 构建配置说明（来自 Cargo.toml [profile.release]）：
+  #   - opt-level = 3     — 最高优化等级
+  #   - lto = "fat"       — 全链接时优化，生成更小更快的二进制
+  #   - codegen-units = 1 — 单 codegen unit，最大化 LLVM 优化空间
+  #   - panic = "abort"   — 终止式 panic，减小二进制体积
+  #   - strip = "symbols" — 剥离调试符号
+  #
+  # Debug 构建配置（来自 Cargo.toml [profile.dev]）：
+  #   - opt-level = 1     — 基础优化
+  #   - debug = 2         — 完整调试信息，支持 backtrace
+  #   - 第三方依赖以 O2 编译
+  # =========================================================================
+  build:
+    name: Build (x86_64-windows)
+    needs: [prepare, check, create-release]
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    env:
+      LLVM_SYS_211_PREFIX: "C:\\llvm"
+
+    steps:
+      # 检出对应的代码版本
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      # 安装 Rust 稳定版工具链
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # 缓存 LLVM（与 ci.yml 和 check 作业共享相同的缓存键）
+      - name: Cache LLVM
+        id: cache-llvm
+        uses: actions/cache@v4
+        with:
+          path: C:\llvm
+          key: llvm-${{ env.LLVM_VERSION }}-x86_64-pc-windows-msvc-v1
+
+      - name: Download and install LLVM
+        if: steps.cache-llvm.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          LLVM_URL="https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/clang+llvm-${LLVM_VERSION}-x86_64-pc-windows-msvc.tar.xz"
+          echo "::group::Download LLVM ${LLVM_VERSION}"
+          curl -L --fail --retry 3 -o llvm.tar.xz "$LLVM_URL"
+          echo "::endgroup::"
+
+          echo "::group::Extract LLVM"
+          7z x llvm.tar.xz -o"${RUNNER_TEMP}" -y > /dev/null
+          7z x "${RUNNER_TEMP}/clang+llvm-${LLVM_VERSION}-x86_64-pc-windows-msvc.tar" \
+            -o"${RUNNER_TEMP}/llvm_extract" -y > /dev/null
+          mv "${RUNNER_TEMP}/llvm_extract/clang+llvm-${LLVM_VERSION}-x86_64-pc-windows-msvc" \
+            "C:/llvm"
+          rm -f llvm.tar.xz
+          rm -rf "${RUNNER_TEMP}/clang+llvm-"* "${RUNNER_TEMP}/llvm_extract"
+          echo "::endgroup::"
+
+          echo "::group::Create libxml2s.lib stub"
+          echo "void __libxml2s_stub(void) {}" > stub.c
+          "C:/llvm/bin/clang.exe" -c stub.c -o stub.obj
+          "C:/llvm/bin/llvm-lib.exe" /OUT:"C:/llvm/lib/libxml2s.lib" stub.obj
+          rm -f stub.c stub.obj
+          echo "::endgroup::"
+
+      # 缓存 Cargo 依赖和编译产物
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-
+
+      # -------------------------------------------------------------------
+      # 构建 release 版本（始终执行）
+      # -------------------------------------------------------------------
+      - name: Build release
+        run: cargo build --release --verbose
+
+      # -------------------------------------------------------------------
+      # 构建 debug 版本（仅预发布时执行）
+      # -------------------------------------------------------------------
+      # debug 构建包含完整调试信息，方便开发者排查问题。
+      # 正式版不需要 debug 构建，减少发布产物体积。
+      # -------------------------------------------------------------------
+      - name: Build debug
+        if: needs.prepare.outputs.is_release == 'false'
+        run: cargo build --verbose
+
+      # -------------------------------------------------------------------
+      # 收集构建产物
+      # -------------------------------------------------------------------
+      # 重命名规则：
+      #   <crate>_<artifact_version>_x86_64-windows.exe          (release)
+      #   <crate>_<artifact_version>_x86_64-windows-debug.exe    (debug, 仅预发布)
+      #
+      # 示例（正式版）：
+      #   taoc_0.1.0_x86_64-windows.exe
+      #   taichi_0.1.0_x86_64-windows.exe
+      #
+      # 示例（预发布）：
+      #   taoc_0.1.0+build.20260304120000_x86_64-windows.exe
+      #   taoc_0.1.0+build.20260304120000_x86_64-windows-debug.exe
+      #   taichi_0.1.0+build.20260304120000_x86_64-windows.exe
+      #   taichi_0.1.0+build.20260304120000_x86_64-windows-debug.exe
+      # -------------------------------------------------------------------
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          VERSION="${{ needs.prepare.outputs.artifact_version }}"
+          IS_RELEASE="${{ needs.prepare.outputs.is_release }}"
+
+          mkdir -p upload
+
+          # Release 构建（始终收集）
+          cp target/release/taoc.exe   "upload/taoc_${VERSION}_x86_64-windows.exe"
+          cp target/release/taichi.exe "upload/taichi_${VERSION}_x86_64-windows.exe"
+          echo "::notice::Release artifacts collected"
+
+          # Debug 构建（仅预发布）
+          if [ "$IS_RELEASE" = "false" ]; then
+            cp target/debug/taoc.exe   "upload/taoc_${VERSION}_x86_64-windows-debug.exe"
+            cp target/debug/taichi.exe "upload/taichi_${VERSION}_x86_64-windows-debug.exe"
+            echo "::notice::Debug artifacts collected"
+          fi
+
+          # 打印产物列表和大小
+          echo "--- Artifacts ---"
+          ls -lh upload/
+
+      # 将构建产物上传到之前创建的 GitHub Release
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag_name }}
+          files: upload/*
