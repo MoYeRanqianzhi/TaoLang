@@ -9,6 +9,12 @@
 #   - Windows (7z 解压, llvm-lib.exe 创建 .lib 桩)
 #   - Linux/macOS (tar 解压, ar 创建 .a 桩)
 #
+# 注意：LLVM 21.x 起预编译包命名规则有变化：
+#   - Windows: clang+llvm-21.1.8-x86_64-pc-windows-msvc.tar.xz
+#   - Linux:   LLVM-21.1.8-Linux-X64.tar.xz
+#   - macOS:   LLVM-21.1.8-macOS-ARM64.tar.xz
+#   解压后目录名各不相同，本 action 使用动态检测而非硬编码目录名。
+#
 # 使用方式：
 #   - uses: ./.github/actions/setup-llvm
 #     with:
@@ -47,14 +53,14 @@ runs:
   using: composite
   steps:
     # 缓存 LLVM 安装目录
-    # LLVM 预编译包解压后约 3GB，首次下载和解压需要数分钟。
+    # LLVM 预编译包解压后约 1~3GB，首次下载和解压需要数分钟。
     # 缓存键包含 LLVM 版本号和平台标识，版本更新时自动失效。
     - name: Cache LLVM
       id: cache-llvm
       uses: actions/cache@v4
       with:
         path: ${{ inputs.llvm-install }}
-        key: llvm-${{ inputs.llvm-version }}-${{ inputs.cache-key }}-v1
+        key: llvm-${{ inputs.llvm-version }}-${{ inputs.cache-key }}-v2
 
     # 下载并安装 LLVM（仅在缓存未命中时执行）
     - name: Download and install LLVM
@@ -63,6 +69,7 @@ runs:
       run: |
         LLVM_URL="https://github.com/llvm/llvm-project/releases/download/llvmorg-${{ inputs.llvm-version }}/${{ inputs.llvm-package }}.tar.xz"
         echo "::group::Download LLVM ${{ inputs.llvm-version }}"
+        echo "URL: $LLVM_URL"
         curl -L --fail --retry 3 -o llvm.tar.xz "$LLVM_URL"
         echo "::endgroup::"
 
@@ -79,14 +86,28 @@ runs:
           tar xf llvm.tar.xz -C "${RUNNER_TEMP}/llvm_extract"
         fi
 
+        # 动态查找解压后的顶层目录
+        # LLVM 21.x 起包名和内部目录名因平台而异：
+        #   Windows: clang+llvm-21.1.8-x86_64-pc-windows-msvc/
+        #   Linux:   LLVM-21.1.8-Linux-X64/
+        #   macOS:   LLVM-21.1.8-macOS-ARM64/
+        # 使用 find 查找唯一的顶层目录，避免硬编码
+        EXTRACTED_DIR=$(find "${RUNNER_TEMP}/llvm_extract" -mindepth 1 -maxdepth 1 -type d | head -1)
+        if [ -z "$EXTRACTED_DIR" ]; then
+          echo "::error::Failed to find extracted LLVM directory"
+          ls -la "${RUNNER_TEMP}/llvm_extract/"
+          exit 1
+        fi
+        echo "Extracted directory: $EXTRACTED_DIR"
+
         # 移动到最终安装路径
         INSTALL_DIR="${{ inputs.llvm-install }}"
         if [ "${{ runner.os }}" = "Windows" ]; then
-          mv "${RUNNER_TEMP}/llvm_extract/${{ inputs.llvm-package }}" "$INSTALL_DIR"
+          mv "$EXTRACTED_DIR" "$INSTALL_DIR"
         else
           # Linux/macOS: /opt 需要 sudo 权限
           sudo mkdir -p "$(dirname "$INSTALL_DIR")"
-          sudo mv "${RUNNER_TEMP}/llvm_extract/${{ inputs.llvm-package }}" "$INSTALL_DIR"
+          sudo mv "$EXTRACTED_DIR" "$INSTALL_DIR"
         fi
 
         # 清理临时文件
@@ -104,8 +125,13 @@ runs:
           "$INSTALL_DIR/bin/llvm-lib.exe" /OUT:"$INSTALL_DIR/lib/libxml2s.lib" stub.obj
           rm -f stub.obj
         else
-          # Linux/macOS: 使用 LLVM clang + ar 创建 .a
-          "$INSTALL_DIR/bin/clang" -c stub.c -o stub.o
+          # Linux/macOS: 优先使用 LLVM 自带的 clang，回退到系统 cc
+          CLANG="$INSTALL_DIR/bin/clang"
+          if [ ! -x "$CLANG" ]; then
+            CLANG="cc"
+            echo "::notice::LLVM clang not found, using system cc for stub library"
+          fi
+          "$CLANG" -c stub.c -o stub.o
           ar rcs "$INSTALL_DIR/lib/libxml2s.a" stub.o
           rm -f stub.o
         fi

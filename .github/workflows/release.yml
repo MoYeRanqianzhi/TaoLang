@@ -24,11 +24,11 @@
 #      - 在 Actions 页面手动输入 tag 名称触发
 #      - 用于补发遗漏的历史版本或重新构建失败的发布
 #
-# 构建平台（4 平台并行构建）：
+# 构建平台（3 平台并行构建）：
 #   - Windows x86_64  (windows-latest)
 #   - Linux x86_64    (ubuntu-latest)
 #   - macOS ARM       (macos-latest, Apple Silicon)
-#   - macOS Intel     (macos-13)
+#   注：macOS Intel 无 LLVM 21.1.8 预编译包，暂不支持。
 #
 # LLVM 预编译包通过 composite action (.github/actions/setup-llvm) 安装并缓存。
 #
@@ -43,7 +43,6 @@
 #   - x86_64-windows  (Windows, .exe)
 #   - x86_64-linux    (Linux)
 #   - aarch64-macos   (macOS ARM)
-#   - x86_64-macos    (macOS Intel)
 #
 # 质量保障：
 #   本工作流内置了 CI 检查作业（测试 + clippy），作为构建和发布的前置门槛。
@@ -305,9 +304,9 @@ jobs:
         uses: ./.github/actions/setup-llvm
         with:
           llvm-version: ${{ env.LLVM_VERSION }}
-          llvm-package: "clang+llvm-${{ env.LLVM_VERSION }}-x86_64-linux-gnu-ubuntu-24.04"
+          llvm-package: "LLVM-21.1.8-Linux-X64"
           llvm-install: "/opt/llvm"
-          cache-key: "x86_64-linux-gnu"
+          cache-key: "x86_64-linux"
           extract-tool: "tar"
           stub-lib-ext: "a"
 
@@ -318,9 +317,9 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-x86_64-linux-gnu-cargo-check-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-x86_64-linux-cargo-check-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-x86_64-linux-gnu-cargo-check-
+            ${{ runner.os }}-x86_64-linux-cargo-check-
 
       # 运行单元测试，确保代码逻辑正确
       - name: Run tests
@@ -387,7 +386,6 @@ jobs:
             | **Windows x86_64** | `taoc_*_x86_64-windows.exe` | `taichi_*_x86_64-windows.exe` |
             | **Linux x86_64** | `taoc_*_x86_64-linux` | `taichi_*_x86_64-linux` |
             | **macOS ARM (Apple Silicon)** | `taoc_*_aarch64-macos` | `taichi_*_aarch64-macos` |
-            | **macOS Intel** | `taoc_*_x86_64-macos` | `taichi_*_x86_64-macos` |
 
             ```bash
             # 编译 TaoLang 源文件
@@ -437,7 +435,6 @@ jobs:
             | **Windows x86_64** | `taoc_*_x86_64-windows.exe` | `taichi_*_x86_64-windows.exe` |
             | **Linux x86_64** | `taoc_*_x86_64-linux` | `taichi_*_x86_64-linux` |
             | **macOS ARM** | `taoc_*_aarch64-macos` | `taichi_*_aarch64-macos` |
-            | **macOS Intel** | `taoc_*_x86_64-macos` | `taichi_*_x86_64-macos` |
 
             **Debug 构建**（含调试信息，支持 backtrace，文件名带 `-debug` 后缀）：
 
@@ -446,7 +443,6 @@ jobs:
             | **Windows x86_64** | `taoc_*_x86_64-windows-debug.exe` | `taichi_*_x86_64-windows-debug.exe` |
             | **Linux x86_64** | `taoc_*_x86_64-linux-debug` | `taichi_*_x86_64-linux-debug` |
             | **macOS ARM** | `taoc_*_aarch64-macos-debug` | `taichi_*_aarch64-macos-debug` |
-            | **macOS Intel** | `taoc_*_x86_64-macos-debug` | `taichi_*_x86_64-macos-debug` |
 
             ### 变更记录
 
@@ -456,7 +452,7 @@ jobs:
   # =========================================================================
   # 作业 4：跨平台构建并上传产物
   # =========================================================================
-  # 在 4 个平台上并行构建 taoc 和 taichi 的 release 版本。
+  # 在 3 个平台上并行构建 taoc 和 taichi 的 release 版本。
   # 预发布时额外构建 debug 版本（通过 -debug 后缀区分）。
   #
   # LLVM 安装通过 composite action 统一处理，各平台差异封装在矩阵变量中。
@@ -497,9 +493,9 @@ jobs:
 
           # Linux x86_64
           - runner: ubuntu-latest
-            llvm_package: "clang+llvm-21.1.8-x86_64-linux-gnu-ubuntu-24.04"
+            llvm_package: "LLVM-21.1.8-Linux-X64"
             llvm_install: "/opt/llvm"
-            llvm_cache_key: "x86_64-linux-gnu"
+            llvm_cache_key: "x86_64-linux"
             extract_tool: "tar"
             stub_lib_ext: "a"
             asset_suffix: "x86_64-linux"
@@ -507,22 +503,12 @@ jobs:
 
           # macOS ARM (Apple Silicon)
           - runner: macos-latest
-            llvm_package: "clang+llvm-21.1.8-arm64-apple-darwin"
+            llvm_package: "LLVM-21.1.8-macOS-ARM64"
             llvm_install: "/opt/llvm"
-            llvm_cache_key: "arm64-apple-darwin"
+            llvm_cache_key: "aarch64-macos"
             extract_tool: "tar"
             stub_lib_ext: "a"
             asset_suffix: "aarch64-macos"
-            exe_ext: ""
-
-          # macOS Intel
-          - runner: macos-13
-            llvm_package: "clang+llvm-21.1.8-x86_64-apple-darwin"
-            llvm_install: "/opt/llvm"
-            llvm_cache_key: "x86_64-apple-darwin"
-            extract_tool: "tar"
-            stub_lib_ext: "a"
-            asset_suffix: "x86_64-macos"
             exe_ext: ""
 
     steps:

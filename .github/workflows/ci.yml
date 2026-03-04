@@ -14,11 +14,11 @@
 #   6. 依赖审计   — 检测依赖中已知的安全漏洞
 #
 # 平台说明：
-#   taoc 依赖 LLVM 21.1.8 进行代码生成，在 4 个平台上并行构建：
+#   taoc 依赖 LLVM 21.1.8 进行代码生成，在 3 个平台上并行构建：
 #     - Windows x86_64  (windows-latest)
 #     - Linux x86_64    (ubuntu-latest)
 #     - macOS ARM       (macos-latest, Apple Silicon)
-#     - macOS Intel     (macos-13)
+#   注：macOS Intel 无 LLVM 21.1.8 预编译包，暂不支持。
 #   LLVM 预编译包通过 composite action (.github/actions/setup-llvm) 安装并缓存。
 #   格式检查和安全审计不需要 LLVM，在 Ubuntu 上运行以加速执行。
 # =============================================================================
@@ -53,7 +53,7 @@ jobs:
   # =========================================================================
   # 作业 1：跨平台编译 + 测试 + Clippy
   # =========================================================================
-  # 使用矩阵策略在 4 个平台上并行构建。
+  # 使用矩阵策略在 3 个平台上并行构建。
   # LLVM 安装通过 composite action 统一处理，各平台差异封装在矩阵变量中。
   # =========================================================================
   build-and-test:
@@ -75,25 +75,17 @@ jobs:
 
           # Linux x86_64
           - runner: ubuntu-latest
-            llvm_package: "clang+llvm-21.1.8-x86_64-linux-gnu-ubuntu-24.04"
+            llvm_package: "LLVM-21.1.8-Linux-X64"
             llvm_install: "/opt/llvm"
-            llvm_cache_key: "x86_64-linux-gnu"
+            llvm_cache_key: "x86_64-linux"
             extract_tool: "tar"
             stub_lib_ext: "a"
 
           # macOS ARM (Apple Silicon)
           - runner: macos-latest
-            llvm_package: "clang+llvm-21.1.8-arm64-apple-darwin"
+            llvm_package: "LLVM-21.1.8-macOS-ARM64"
             llvm_install: "/opt/llvm"
-            llvm_cache_key: "arm64-apple-darwin"
-            extract_tool: "tar"
-            stub_lib_ext: "a"
-
-          # macOS Intel
-          - runner: macos-13
-            llvm_package: "clang+llvm-21.1.8-x86_64-apple-darwin"
-            llvm_install: "/opt/llvm"
-            llvm_cache_key: "x86_64-apple-darwin"
+            llvm_cache_key: "aarch64-macos"
             extract_tool: "tar"
             stub_lib_ext: "a"
 
