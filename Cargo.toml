@@ -1,0 +1,49 @@
+# ============================================================================
+# TaoLang 项目根 Cargo.toml — Workspace 配置
+# ============================================================================
+# 本文件定义 Cargo 工作区，包含两个成员 crate：
+#   - taoc:   TaoLang 编译器
+#   - taichi: TaoLang 包管理器
+# ============================================================================
+
+[workspace]
+# Rust 2024 edition 使用 resolver v3
+resolver = "3"
+# 工作区成员 crate 列表
+members = [
+    "taoc",     # TaoLang 编译器
+    "taichi",   # TaoLang 包管理器
+]
+
+# 工作区共享的包元数据
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+authors = ["TaoLang Team"]
+license = "MIT"
+
+# 工作区共享的依赖版本（各成员 crate 通过 .workspace = true 引用）
+[workspace.dependencies]
+# CLI 参数解析框架
+clap = { version = "4", features = ["derive"] }
+# 丰富的源码诊断错误报告
+miette = { version = "7", features = ["fancy"] }
+# 声明式错误类型定义
+thiserror = "2"
+
+# ============================================================================
+# Release 构建优化配置（面向分发，性能优先）
+# ============================================================================
+[profile.release]
+# 最高性能优化等级（-O3：向量化、循环展开、内联等全部启用）
+opt-level = 3
+# 全程序链接时优化：跨 crate 边界内联、消除死代码（taoc 链接 LLVM，效果显著）
+lto = "fat"
+# 单编译单元：给 LLVM 优化器完整的全局视图，配合 fat LTO 效果最佳
+codegen-units = 1
+# panic 时立即终止：去除 unwind 表和 landing pad，减小体积和分支开销
+panic = "abort"
+# 剥离符号表：分发产物不需要调试符号，显著缩小二进制体积
+strip = "symbols"
+# 去除整数溢出运行时检查：编译器内部算术已知安全，微减运行时开销
+overflow-checks = false
