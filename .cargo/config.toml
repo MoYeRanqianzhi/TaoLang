@@ -1,0 +1,20 @@
+# ============================================================================
+# Cargo 构建配置
+# ============================================================================
+#
+# 关于 Windows CRT 堆不匹配问题的说明：
+#
+# LLVM 预编译静态库使用 /MT（静态 CRT），Rust 默认使用 /MD（动态 CRT）。
+# 两种 CRT 维护独立的堆，导致 LLVM 的 strdup() 分配的内存不能通过
+# LLVMDisposeMessage()（即 LLVM 的 free()）正确释放。
+#
+# 不能使用 /NODEFAULTLIB:libcmt.lib 方案，因为 LLVM .obj 文件内嵌
+# MT_StaticRelease ABI 标记，与动态 C++ 运行时 (msvcprt.lib) 冲突。
+#
+# 解决方案在代码层面（llvm_wrapper.rs）：
+#   1. LLVMPrintModuleToString → 使用 libc::free() 释放（与 Rust 同 CRT 堆）
+#   2. LLVMGetDefaultTargetTriple → 改用 Rust 编译期目标三元组，避免 LLVM 分配
+#   3. LLVMSetModuleDataLayout → 模块接管所有权，无需手动释放
+#
+# 详见 docs/problems/crt-mismatch.md
+# ============================================================================

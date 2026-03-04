@@ -1,0 +1,36 @@
+# ============================================================================
+# TaoLang 项目 .gitignore
+# ============================================================================
+
+# Rust / Cargo 构建产物
+target/
+taoc/target/
+taichi/target/
+
+# 编译器生成的中间文件和输出
+*.obj
+*.o
+*.pdb
+*.exe
+*.dll
+*.so
+*.dylib
+
+# IDE 和编辑器配置
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 系统文件
+.DS_Store
+Thumbs.db
+nul
+
+# Claude / Agent 配置
+Claude.md
+Agents.md
+.claude
+.agents
+skills-lock.json

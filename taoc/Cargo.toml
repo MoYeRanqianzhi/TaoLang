@@ -1,0 +1,34 @@
+# ============================================================================
+# taoc — TaoLang 编译器 Cargo 配置
+# ============================================================================
+# TaoLang 编译器，将 .tao 源代码编译为本地可执行文件。
+# 使用 LLVM 作为后端进行代码生成和优化。
+# ============================================================================
+
+[package]
+name = "taoc"
+description = "The TaoLang Compiler — compiles .tao source files to native executables via LLVM"
+# 继承工作区共享元数据
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+# 编译器二进制入口
+[[bin]]
+name = "taoc"
+path = "src/main.rs"
+
+[dependencies]
+# 工作区共享依赖
+clap.workspace = true
+miette.workspace = true
+thiserror.workspace = true
+# LLVM C API 绑定（版本号 211 对应 LLVM 21.1.x）
+llvm-sys = "211"
+# C 标准库绑定（类型定义，如 c_void、size_t）
+libc = "0.2"
+
+[build-dependencies]
+# C 编译器封装（用于编译 LLVM 字符串桥接层 csrc/llvm_string_bridge.c）
+cc = "1"

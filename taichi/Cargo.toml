@@ -1,0 +1,30 @@
+# ============================================================================
+# taichi — TaoLang 包管理器 Cargo 配置
+# ============================================================================
+# TaoLang 包管理器，负责项目初始化、依赖管理、构建编排等。
+# 构建和运行命令委托给 taoc 编译器执行。
+# ============================================================================
+
+[package]
+name = "taichi"
+description = "The TaoLang Package Manager — manages projects, dependencies, and build workflows"
+# 继承工作区共享元数据
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+# 包管理器二进制入口
+[[bin]]
+name = "taichi"
+path = "src/main.rs"
+
+[dependencies]
+# 工作区共享依赖
+clap.workspace = true
+miette.workspace = true
+thiserror.workspace = true
+# TOML 配置文件解析（用于读取 tao.toml 项目配置）
+toml = "0.8"
+# 序列化/反序列化框架（用于配置文件数据映射）
+serde = { version = "1", features = ["derive"] }
