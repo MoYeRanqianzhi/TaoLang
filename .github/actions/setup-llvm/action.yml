@@ -67,10 +67,17 @@ runs:
       shell: bash
       run: |
         if [ "${{ runner.os }}" = "macOS" ]; then
-          # macOS runner 不自带 zstd；libxml2 在 SDK 中但 Homebrew 版更可靠
+          # macOS runner 不自带 zstd；libxml2 是 keg-only（不链接到 /opt/homebrew/lib）
           echo "::group::Install macOS dependencies (zstd, libxml2)"
           brew install zstd libxml2
           echo "::endgroup::"
+
+          # libxml2 是 Homebrew keg-only 包，不会创建 /opt/homebrew/lib/libxml2.dylib 的符号链接。
+          # 设置 LIBRARY_PATH 让 cc/clang linker 能找到 keg-only 包的库路径。
+          ZSTD_LIB="$(brew --prefix zstd)/lib"
+          XML2_LIB="$(brew --prefix libxml2)/lib"
+          echo "LIBRARY_PATH=${ZSTD_LIB}:${XML2_LIB}${LIBRARY_PATH:+:$LIBRARY_PATH}" >> "$GITHUB_ENV"
+          echo "::notice::LIBRARY_PATH set to include ${ZSTD_LIB} and ${XML2_LIB}"
         elif [ "${{ runner.os }}" = "Linux" ]; then
           # Ubuntu runner 通常已有这些库，但显式安装确保可靠性
           echo "::group::Install Linux dependencies (zstd, libxml2)"
