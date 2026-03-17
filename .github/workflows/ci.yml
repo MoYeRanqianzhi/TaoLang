@@ -120,63 +120,34 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ matrix.llvm_cache_key }}-cargo-
 
-      # macOS: 移除 LLVM 自带的 libc++ 动态库，避免与系统 libc++ 冲突
-      # LLVM 预编译包在 lib/ 下附带了 libc++.dylib / libc++abi.dylib。
-      # 链接器搜索 -lc++ 时按 -L 顺序查找，/opt/llvm/lib 先于系统路径，
-      # 会导致链接到 LLVM 的 libc++ 而非系统的，引发 ABI 不兼容或符号冲突。
-      # 移除后，-lc++ 会在系统 SDK sysroot 中找到正确的系统 libc++。
-      - name: Remove LLVM bundled libc++ (avoid system conflict)
+      # macOS: 移除 LLVM 自带的动态库，避免与系统库冲突
+      # LLVM 预编译包在 lib/ 下附带了 libc++.dylib、libunwind.dylib 等。
+      # /opt/llvm/lib 在链接搜索路径中优先于系统路径，导致链接到
+      # LLVM 的版本而非系统的，引发 ABI 不兼容或版本冲突。
+      # 移除后，链接器在系统 SDK sysroot 中找到正确的系统版本。
+      - name: Remove LLVM bundled system libs (avoid conflict)
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          echo "Removing LLVM bundled libc++ to avoid conflict with system libc++:"
-          ls -la ${{ matrix.llvm_install }}/lib/libc++* 2>/dev/null || echo "No bundled libc++ found"
+          echo "Removing LLVM bundled system libraries to avoid conflicts:"
+          # libc++ — 避免 ABI 不兼容
           sudo rm -f ${{ matrix.llvm_install }}/lib/libc++*.dylib
           sudo rm -f ${{ matrix.llvm_install }}/lib/libc++abi*.dylib
-          echo "Done. System libc++ will be used for -lc++ linking."
+          # libunwind — 避免 "built for newer macOS version" 警告和冲突
+          sudo rm -f ${{ matrix.llvm_install }}/lib/libunwind*.dylib
+          echo "Done. System libraries will be used for linking."
 
       - name: Check compilation
         run: cargo check --verbose
 
       - name: Run tests
-        shell: bash
-        run: |
-          # macOS: ld stderr 只显示 warning 但返回非零退出码。
-          # 使用 linker wrapper 同时捕获 stdout 和 stderr，
-          # 并添加 -Wl,-ld_classic 使用经典链接器获取更好的错误输出。
-          if [ "${{ runner.os }}" = "macOS" ]; then
-            cat > /tmp/cc-wrapper.sh << 'WRAPPER'
-          #!/bin/bash
-          cc "$@" > /tmp/ld-stdout.log 2> /tmp/ld-stderr.log
-          EXIT=$?
-          if [ $EXIT -ne 0 ]; then
-            cat /tmp/ld-stdout.log >> /tmp/ld-all-output.log 2>/dev/null
-            cat /tmp/ld-stderr.log >> /tmp/ld-all-output.log 2>/dev/null
-          fi
-          # 将 stderr 重新输出给 rustc 以保持正常诊断
-          cat /tmp/ld-stderr.log >&2
-          exit $EXIT
-          WRAPPER
-            chmod +x /tmp/cc-wrapper.sh
-            RUSTFLAGS="-C linker=/tmp/cc-wrapper.sh -C link-arg=-Wl,-ld_classic" cargo test --verbose
-          else
-            cargo test --verbose
-          fi
-
-      # macOS 链接失败时显示完整的链接器输出（stdout + stderr）
-      - name: Show full linker output
-        if: failure() && runner.os == 'macOS'
-        shell: bash
-        run: |
-          echo "::group::Full linker output (stdout + stderr combined)"
-          cat /tmp/ld-all-output.log 2>/dev/null || echo "No linker output log found"
-          echo "::endgroup::"
-          echo "::group::Last linker stdout"
-          cat /tmp/ld-stdout.log 2>/dev/null || echo "No stdout"
-          echo "::endgroup::"
-          echo "::group::Last linker stderr"
-          cat /tmp/ld-stderr.log 2>/dev/null || echo "No stderr"
-          echo "::endgroup::"
+        run: cargo test --verbose
+        env:
+          # macOS: LLVM 21.1.8 静态库含有 LLVM 21 bitcode，但 Xcode 的链接器
+          # 使用 Apple LLVM 17.0.0，无法解析新属性（"Unknown attribute kind (102)"）。
+          # 同时移除 /opt/llvm/lib 中的 libunwind.dylib，避免与系统 libunwind 冲突。
+          # 添加 -C lto=off 禁用 LTO，避免链接器解析 LLVM bitcode。
+          RUSTFLAGS: ${{ runner.os == 'macOS' && '-C lto=off' || '' }}
 
       - name: Build release
         run: cargo build --release --verbose
