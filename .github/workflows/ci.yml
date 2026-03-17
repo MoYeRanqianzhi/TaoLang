@@ -120,11 +120,41 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ matrix.llvm_cache_key }}-cargo-
 
+      # 诊断步骤：检查 LLVM 安装内容和链接器配置（仅 macOS，用于排查链接问题）
+      - name: Diagnose LLVM installation
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          echo "::group::LLVM static libraries"
+          ls ${{ matrix.llvm_install }}/lib/*.a 2>/dev/null | head -10 || echo "No .a files found!"
+          echo "Total .a files: $(ls ${{ matrix.llvm_install }}/lib/*.a 2>/dev/null | wc -l)"
+          echo "::endgroup::"
+
+          echo "::group::LLVM dynamic libraries"
+          ls ${{ matrix.llvm_install }}/lib/*.dylib 2>/dev/null | head -10 || echo "No .dylib files found!"
+          echo "::endgroup::"
+
+          echo "::group::llvm-config output"
+          ${{ matrix.llvm_install }}/bin/llvm-config --link-static --system-libs 2>&1 || true
+          ${{ matrix.llvm_install }}/bin/llvm-config --link-static --libs core 2>&1 || true
+          ${{ matrix.llvm_install }}/bin/llvm-config --shared-mode 2>&1 || true
+          echo "::endgroup::"
+
+          echo "::group::Homebrew keg paths"
+          echo "zstd: $(brew --prefix zstd 2>/dev/null || echo 'not installed')"
+          echo "libxml2: $(brew --prefix libxml2 2>/dev/null || echo 'not installed')"
+          ls "$(brew --prefix zstd)/lib"/*.dylib 2>/dev/null | head -5 || echo "No zstd dylib"
+          ls "$(brew --prefix libxml2)/lib"/*.dylib 2>/dev/null | head -5 || echo "No libxml2 dylib"
+          echo "::endgroup::"
+
       - name: Check compilation
         run: cargo check --verbose
 
       - name: Run tests
         run: cargo test --verbose
+        env:
+          # macOS 链接器诊断：捕获完整 ld 输出，避免错误信息被截断
+          RUSTC_LOG: ${{ runner.os == 'macOS' && 'rustc_codegen_ssa::back::link=info' || '' }}
 
       - name: Build release
         run: cargo build --release --verbose
