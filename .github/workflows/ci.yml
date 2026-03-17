@@ -120,41 +120,45 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ matrix.llvm_cache_key }}-cargo-
 
-      # 诊断步骤：检查 LLVM 安装内容和链接器配置（仅 macOS，用于排查链接问题）
-      - name: Diagnose LLVM installation
+      # macOS: 移除 LLVM 自带的 libc++ 动态库，避免与系统 libc++ 冲突
+      # LLVM 预编译包在 lib/ 下附带了 libc++.dylib / libc++abi.dylib。
+      # 链接器搜索 -lc++ 时按 -L 顺序查找，/opt/llvm/lib 先于系统路径，
+      # 会导致链接到 LLVM 的 libc++ 而非系统的，引发 ABI 不兼容或符号冲突。
+      # 移除后，-lc++ 会在系统 SDK sysroot 中找到正确的系统 libc++。
+      - name: Remove LLVM bundled libc++ (avoid system conflict)
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          echo "::group::LLVM static libraries"
-          ls ${{ matrix.llvm_install }}/lib/*.a 2>/dev/null | head -10 || echo "No .a files found!"
-          echo "Total .a files: $(ls ${{ matrix.llvm_install }}/lib/*.a 2>/dev/null | wc -l)"
-          echo "::endgroup::"
-
-          echo "::group::LLVM dynamic libraries"
-          ls ${{ matrix.llvm_install }}/lib/*.dylib 2>/dev/null | head -10 || echo "No .dylib files found!"
-          echo "::endgroup::"
-
-          echo "::group::llvm-config output"
-          ${{ matrix.llvm_install }}/bin/llvm-config --link-static --system-libs 2>&1 || true
-          ${{ matrix.llvm_install }}/bin/llvm-config --link-static --libs core 2>&1 || true
-          ${{ matrix.llvm_install }}/bin/llvm-config --shared-mode 2>&1 || true
-          echo "::endgroup::"
-
-          echo "::group::Homebrew keg paths"
-          echo "zstd: $(brew --prefix zstd 2>/dev/null || echo 'not installed')"
-          echo "libxml2: $(brew --prefix libxml2 2>/dev/null || echo 'not installed')"
-          ls "$(brew --prefix zstd)/lib"/*.dylib 2>/dev/null | head -5 || echo "No zstd dylib"
-          ls "$(brew --prefix libxml2)/lib"/*.dylib 2>/dev/null | head -5 || echo "No libxml2 dylib"
-          echo "::endgroup::"
+          echo "Removing LLVM bundled libc++ to avoid conflict with system libc++:"
+          ls -la ${{ matrix.llvm_install }}/lib/libc++* 2>/dev/null || echo "No bundled libc++ found"
+          sudo rm -f ${{ matrix.llvm_install }}/lib/libc++*.dylib
+          sudo rm -f ${{ matrix.llvm_install }}/lib/libc++abi*.dylib
+          echo "Done. System libc++ will be used for -lc++ linking."
 
       - name: Check compilation
         run: cargo check --verbose
 
       - name: Run tests
-        run: cargo test --verbose
-        env:
-          # macOS 链接器诊断：捕获完整 ld 输出，避免错误信息被截断
-          RUSTC_LOG: ${{ runner.os == 'macOS' && 'rustc_codegen_ssa::back::link=info' || '' }}
+        shell: bash
+        run: |
+          # 使用 linker wrapper 捕获完整的 ld 错误输出（rustc 会截断 ld stderr）
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            cat > /tmp/cc-wrapper.sh << 'WRAPPER'
+          #!/bin/bash
+          cc "$@" 2>/tmp/ld-stderr.log
+          EXIT=$?
+          if [ $EXIT -ne 0 ]; then
+            echo "::group::Full linker stderr"
+            cat /tmp/ld-stderr.log
+            echo "::endgroup::"
+          fi
+          exit $EXIT
+          WRAPPER
+            chmod +x /tmp/cc-wrapper.sh
+            RUSTFLAGS="-C linker=/tmp/cc-wrapper.sh" cargo test --verbose
+          else
+            cargo test --verbose
+          fi
 
       - name: Build release
         run: cargo build --release --verbose
