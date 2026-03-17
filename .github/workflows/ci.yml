@@ -140,14 +140,19 @@ jobs:
       - name: Check compilation
         run: cargo check --verbose
 
+      # macOS: 设置 LLVM clang 为链接器
+      # LLVM 21.1.8 预编译静态库包含 LLVM 21 bitcode 对象。
+      # Xcode 16.4 的 Apple ld 使用 libLTO (Apple LLVM 17.0.0)，
+      # 无法解析 LLVM 21 的新属性（"Unknown attribute kind (102)"）。
+      # 解决方案：使用 LLVM 21 自己的 clang 作为链接器驱动，
+      # 其内置正确版本的 LTO 库能处理 LLVM 21 bitcode。
+      - name: Set LLVM clang as linker (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: echo "RUSTFLAGS=-C linker=${{ matrix.llvm_install }}/bin/clang" >> "$GITHUB_ENV"
+
       - name: Run tests
         run: cargo test --verbose
-        env:
-          # macOS: LLVM 21.1.8 静态库含有 LLVM 21 bitcode，但 Xcode 的链接器
-          # 使用 Apple LLVM 17.0.0，无法解析新属性（"Unknown attribute kind (102)"）。
-          # 同时移除 /opt/llvm/lib 中的 libunwind.dylib，避免与系统 libunwind 冲突。
-          # 添加 -C lto=off 禁用 LTO，避免链接器解析 LLVM bitcode。
-          RUSTFLAGS: ${{ runner.os == 'macOS' && '-C lto=off' || '' }}
 
       - name: Build release
         run: cargo build --release --verbose
