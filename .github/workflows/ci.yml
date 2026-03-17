@@ -138,7 +138,12 @@ jobs:
       - name: Set LLVM clang as linker (macOS)
         if: runner.os == 'macOS'
         shell: bash
-        run: echo "RUSTFLAGS=-C linker=${{ matrix.llvm_install }}/bin/clang" >> "$GITHUB_ENV"
+        run: |
+          # 使用 LLVM clang 作为链接器解决 bitcode 不兼容。
+          # rustc 传递 -nodefaultlibs 给链接器，这意味着 LLVM clang 不会
+          # 自动添加 C++ ABI 运行时。LLVM 的 libc++.a 依赖 libc++abi，
+          # 必须显式添加 -lc++abi 解决 undefined symbols。
+          echo "RUSTFLAGS=-C linker=${{ matrix.llvm_install }}/bin/clang -C link-arg=-lc++abi" >> "$GITHUB_ENV"
 
       - name: Run tests
         run: cargo test --verbose
