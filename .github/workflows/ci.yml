@@ -120,22 +120,11 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ matrix.llvm_cache_key }}-cargo-
 
-      # macOS: 移除 LLVM 自带的动态库，避免与系统库冲突
-      # LLVM 预编译包在 lib/ 下附带了 libc++.dylib、libunwind.dylib 等。
-      # /opt/llvm/lib 在链接搜索路径中优先于系统路径，导致链接到
-      # LLVM 的版本而非系统的，引发 ABI 不兼容或版本冲突。
-      # 移除后，链接器在系统 SDK sysroot 中找到正确的系统版本。
-      - name: Remove LLVM bundled system libs (avoid conflict)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          echo "Removing LLVM bundled system libraries to avoid conflicts:"
-          # libc++ — 避免 ABI 不兼容
-          sudo rm -f ${{ matrix.llvm_install }}/lib/libc++*.dylib
-          sudo rm -f ${{ matrix.llvm_install }}/lib/libc++abi*.dylib
-          # libunwind — 避免 "built for newer macOS version" 警告和冲突
-          sudo rm -f ${{ matrix.llvm_install }}/lib/libunwind*.dylib
-          echo "Done. System libraries will be used for linking."
+      # macOS: LLVM 21.1.8 静态库包含 LLVM 21 bitcode，Xcode 的 Apple ld
+      # 使用 libLTO (Apple LLVM 17.0) 无法解析。解决方案是使用 LLVM 21 自带的
+      # clang 作为链接器，它能正确处理 LLVM 21 bitcode。
+      # 注意：使用 LLVM clang 链接时需要保留 LLVM 自带的 libc++/libc++abi，
+      # 因为 LLVM clang 会链接到自己的 C++ 运行时。
 
       - name: Check compilation
         run: cargo check --verbose
