@@ -141,29 +141,41 @@ jobs:
       - name: Run tests
         shell: bash
         run: |
-          # macOS: 使用 linker wrapper 将 ld stderr 保存到文件
-          # rustc 会截断 cc 的 stderr 输出（只显示 3 个 note），
-          # 导致实际的 ld 错误信息不可见。通过 wrapper 将 stderr
-          # 重定向到文件，在后续步骤中单独显示。
+          # macOS: ld stderr 只显示 warning 但返回非零退出码。
+          # 使用 linker wrapper 同时捕获 stdout 和 stderr，
+          # 并添加 -Wl,-ld_classic 使用经典链接器获取更好的错误输出。
           if [ "${{ runner.os }}" = "macOS" ]; then
             cat > /tmp/cc-wrapper.sh << 'WRAPPER'
           #!/bin/bash
-          cc "$@" 2>>/tmp/ld-all-stderr.log
-          exit $?
+          cc "$@" > /tmp/ld-stdout.log 2> /tmp/ld-stderr.log
+          EXIT=$?
+          if [ $EXIT -ne 0 ]; then
+            cat /tmp/ld-stdout.log >> /tmp/ld-all-output.log 2>/dev/null
+            cat /tmp/ld-stderr.log >> /tmp/ld-all-output.log 2>/dev/null
+          fi
+          # 将 stderr 重新输出给 rustc 以保持正常诊断
+          cat /tmp/ld-stderr.log >&2
+          exit $EXIT
           WRAPPER
             chmod +x /tmp/cc-wrapper.sh
-            RUSTFLAGS="-C linker=/tmp/cc-wrapper.sh" cargo test --verbose
+            RUSTFLAGS="-C linker=/tmp/cc-wrapper.sh -C link-arg=-Wl,-ld_classic" cargo test --verbose
           else
             cargo test --verbose
           fi
 
-      # macOS 链接失败时显示完整的 ld 错误输出
-      - name: Show full linker errors
+      # macOS 链接失败时显示完整的链接器输出（stdout + stderr）
+      - name: Show full linker output
         if: failure() && runner.os == 'macOS'
         shell: bash
         run: |
-          echo "::group::Full ld stderr (captured by cc-wrapper)"
-          cat /tmp/ld-all-stderr.log 2>/dev/null || echo "No linker error log found"
+          echo "::group::Full linker output (stdout + stderr combined)"
+          cat /tmp/ld-all-output.log 2>/dev/null || echo "No linker output log found"
+          echo "::endgroup::"
+          echo "::group::Last linker stdout"
+          cat /tmp/ld-stdout.log 2>/dev/null || echo "No stdout"
+          echo "::endgroup::"
+          echo "::group::Last linker stderr"
+          cat /tmp/ld-stderr.log 2>/dev/null || echo "No stderr"
           echo "::endgroup::"
 
       - name: Build release
