@@ -38,4 +38,33 @@ fn main() {
     }
 
     build.compile("llvm_string_bridge");
+
+    // ── macOS Homebrew keg-only 库路径探测 ────────────────────────
+    // LLVM 静态库依赖 zstd、libxml2 等系统库（由 llvm-config --system-libs 报告）。
+    // Homebrew 的 keg-only 包（如 libxml2）安装在 /opt/homebrew/opt/<pkg>/lib 下，
+    // 但不会自动链接到 /opt/homebrew/lib，导致链接器找不到。
+    //
+    // rustc 调用 cc 作为链接器时使用 -nodefaultlibs，此时 cc (clang) 不会
+    // 将 LIBRARY_PATH 环境变量转换为 -L 标志传给 ld，所以必须通过
+    // cargo:rustc-link-search 显式告知 rustc 库搜索路径。
+    //
+    // 仅在 macOS 上执行（cfg!(target_os = "macos") 在 build.rs 中检测宿主机 OS）。
+    if cfg!(target_os = "macos") {
+        // LLVM 系统依赖中可能是 keg-only 的包
+        for pkg in &["zstd", "libxml2"] {
+            if let Ok(output) = std::process::Command::new("brew")
+                .args(["--prefix", pkg])
+                .output()
+            {
+                if !output.status.success() {
+                    continue;
+                }
+                let prefix = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let lib_dir = std::path::PathBuf::from(&prefix).join("lib");
+                if lib_dir.exists() {
+                    println!("cargo:rustc-link-search=native={}", lib_dir.display());
+                }
+            }
+        }
+    }
 }
