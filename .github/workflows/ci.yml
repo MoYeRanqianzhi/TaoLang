@@ -141,24 +141,30 @@ jobs:
       - name: Run tests
         shell: bash
         run: |
-          # 使用 linker wrapper 捕获完整的 ld 错误输出（rustc 会截断 ld stderr）
+          # macOS: 使用 linker wrapper 将 ld stderr 保存到文件
+          # rustc 会截断 cc 的 stderr 输出（只显示 3 个 note），
+          # 导致实际的 ld 错误信息不可见。通过 wrapper 将 stderr
+          # 重定向到文件，在后续步骤中单独显示。
           if [ "${{ runner.os }}" = "macOS" ]; then
             cat > /tmp/cc-wrapper.sh << 'WRAPPER'
           #!/bin/bash
-          cc "$@" 2>/tmp/ld-stderr.log
-          EXIT=$?
-          if [ $EXIT -ne 0 ]; then
-            echo "::group::Full linker stderr"
-            cat /tmp/ld-stderr.log
-            echo "::endgroup::"
-          fi
-          exit $EXIT
+          cc "$@" 2>>/tmp/ld-all-stderr.log
+          exit $?
           WRAPPER
             chmod +x /tmp/cc-wrapper.sh
             RUSTFLAGS="-C linker=/tmp/cc-wrapper.sh" cargo test --verbose
           else
             cargo test --verbose
           fi
+
+      # macOS 链接失败时显示完整的 ld 错误输出
+      - name: Show full linker errors
+        if: failure() && runner.os == 'macOS'
+        shell: bash
+        run: |
+          echo "::group::Full ld stderr (captured by cc-wrapper)"
+          cat /tmp/ld-all-stderr.log 2>/dev/null || echo "No linker error log found"
+          echo "::endgroup::"
 
       - name: Build release
         run: cargo build --release --verbose
