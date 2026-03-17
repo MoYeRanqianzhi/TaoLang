@@ -15,11 +15,18 @@
 #
 # 平台说明：
 #   taoc 依赖 LLVM 21.1.8 进行代码生成，在 3 个平台上并行构建：
-#     - Windows x86_64  (windows-latest)
-#     - Linux x86_64    (ubuntu-latest)
-#     - macOS ARM       (macos-latest, Apple Silicon)
+#     - Windows x86_64  (windows-latest) — LLVM 预编译包下载
+#     - Linux x86_64    (ubuntu-latest)  — LLVM 预编译包下载
+#     - macOS ARM       (macos-latest)   — Homebrew 安装 (brew install llvm@21)
 #   注：macOS Intel 无 LLVM 21.1.8 预编译包，暂不支持。
-#   LLVM 预编译包通过 composite action (.github/actions/setup-llvm) 安装并缓存。
+#
+#   macOS 使用 Homebrew 而非 LLVM 预编译包的原因：
+#     LLVM 官方预编译包 (LLVM-21.1.8-macOS-ARM64.tar.xz) 的静态库含 LLVM 21 bitcode，
+#     但 Xcode 的 Apple ld 使用 libLTO (Apple LLVM 17.0)，无法解析 LLVM 21 新属性
+#     (Unknown attribute kind 102)，导致链接失败。
+#     Homebrew 编译的 LLVM 与系统工具链兼容，不存在此问题。
+#
+#   Windows/Linux 使用 composite action (.github/actions/setup-llvm) 安装并缓存。
 #   格式检查和安全审计不需要 LLVM，在 Ubuntu 上运行以加速执行。
 # =============================================================================
 
@@ -54,7 +61,8 @@ jobs:
   # 作业 1：跨平台编译 + 测试 + Clippy
   # =========================================================================
   # 使用矩阵策略在 3 个平台上并行构建。
-  # LLVM 安装通过 composite action 统一处理，各平台差异封装在矩阵变量中。
+  # Windows/Linux 使用 composite action 下载 LLVM 预编译包。
+  # macOS 使用 Homebrew 安装 LLVM（避免 bitcode 不兼容问题）。
   # =========================================================================
   build-and-test:
     name: Build & Test (${{ matrix.llvm_cache_key }})
@@ -65,29 +73,28 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Windows x86_64
+          # Windows x86_64 — LLVM 预编译包
           - runner: windows-latest
             llvm_package: "clang+llvm-21.1.8-x86_64-pc-windows-msvc"
             llvm_install: "C:/llvm"
             llvm_cache_key: "x86_64-pc-windows-msvc"
             extract_tool: "7z"
             stub_lib_ext: "lib"
+            use_brew: false
 
-          # Linux x86_64
+          # Linux x86_64 — LLVM 预编译包
           - runner: ubuntu-latest
             llvm_package: "LLVM-21.1.8-Linux-X64"
             llvm_install: "/opt/llvm"
             llvm_cache_key: "x86_64-linux"
             extract_tool: "tar"
             stub_lib_ext: "a"
+            use_brew: false
 
-          # macOS ARM (Apple Silicon)
+          # macOS ARM (Apple Silicon) — Homebrew 安装
           - runner: macos-latest
-            llvm_package: "LLVM-21.1.8-macOS-ARM64"
-            llvm_install: "/opt/llvm"
             llvm_cache_key: "aarch64-macos"
-            extract_tool: "tar"
-            stub_lib_ext: "a"
+            use_brew: true
 
     steps:
       - name: Checkout code
@@ -98,8 +105,9 @@ jobs:
         with:
           components: clippy
 
-      # 安装 LLVM（使用 composite action，封装下载/缓存/解压/桩库逻辑）
-      - name: Setup LLVM
+      # ── Windows/Linux：使用 composite action 安装 LLVM 预编译包 ──
+      - name: Setup LLVM (prebuilt)
+        if: ${{ !matrix.use_brew }}
         uses: ./.github/actions/setup-llvm
         with:
           llvm-version: ${{ env.LLVM_VERSION }}
@@ -108,6 +116,23 @@ jobs:
           cache-key: ${{ matrix.llvm_cache_key }}
           extract-tool: ${{ matrix.extract_tool }}
           stub-lib-ext: ${{ matrix.stub_lib_ext }}
+
+      # ── macOS：使用 Homebrew 安装 LLVM ──
+      # Homebrew 提供的 LLVM 预编译 bottle 与系统工具链兼容，
+      # 不含 LLVM 21 bitcode（避免 Apple ld 解析失败）。
+      # llvm@21 是 keg-only 包，不会与系统 clang 冲突。
+      - name: Setup LLVM (Homebrew)
+        if: ${{ matrix.use_brew }}
+        shell: bash
+        run: |
+          echo "::group::Install LLVM 21 via Homebrew"
+          brew install llvm@21
+          echo "::endgroup::"
+
+          # 设置 LLVM_SYS_211_PREFIX 指向 Homebrew 安装路径
+          LLVM_PREFIX="$(brew --prefix llvm@21)"
+          echo "LLVM_SYS_211_PREFIX=${LLVM_PREFIX}" >> "$GITHUB_ENV"
+          echo "::notice::LLVM installed via Homebrew at ${LLVM_PREFIX}"
 
       - name: Cache Cargo
         uses: actions/cache@v4
@@ -120,30 +145,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ matrix.llvm_cache_key }}-cargo-
 
-      # macOS: LLVM 21.1.8 静态库包含 LLVM 21 bitcode，Xcode 的 Apple ld
-      # 使用 libLTO (Apple LLVM 17.0) 无法解析。解决方案是使用 LLVM 21 自带的
-      # clang 作为链接器，它能正确处理 LLVM 21 bitcode。
-      # 注意：使用 LLVM clang 链接时需要保留 LLVM 自带的 libc++/libc++abi，
-      # 因为 LLVM clang 会链接到自己的 C++ 运行时。
-
       - name: Check compilation
         run: cargo check --verbose
-
-      # macOS: 设置 LLVM clang 为链接器
-      # LLVM 21.1.8 预编译静态库包含 LLVM 21 bitcode 对象。
-      # Xcode 16.4 的 Apple ld 使用 libLTO (Apple LLVM 17.0.0)，
-      # 无法解析 LLVM 21 的新属性（"Unknown attribute kind (102)"）。
-      # 解决方案：使用 LLVM 21 自己的 clang 作为链接器驱动，
-      # 其内置正确版本的 LTO 库能处理 LLVM 21 bitcode。
-      - name: Set LLVM clang as linker (macOS)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          # 使用 LLVM clang 作为链接器解决 bitcode 不兼容。
-          # rustc 传递 -nodefaultlibs 给链接器，这意味着 LLVM clang 不会
-          # 自动添加 C++ ABI 运行时。LLVM 的 libc++.a 依赖 libc++abi，
-          # 必须显式添加 -lc++abi 解决 undefined symbols。
-          echo "RUSTFLAGS=-C linker=${{ matrix.llvm_install }}/bin/clang -C link-arg=-lc++abi" >> "$GITHUB_ENV"
 
       - name: Run tests
         run: cargo test --verbose
