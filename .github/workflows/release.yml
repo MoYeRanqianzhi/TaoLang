@@ -25,10 +25,14 @@
 #      - 用于补发遗漏的历史版本或重新构建失败的发布
 #
 # 构建平台（3 平台并行构建）：
-#   - Windows x86_64  (windows-latest)
-#   - Linux x86_64    (ubuntu-latest)
-#   - macOS ARM       (macos-latest, Apple Silicon)
+#   - Windows x86_64  (windows-latest) — LLVM 预编译包下载
+#   - Linux x86_64    (ubuntu-latest)  — LLVM 预编译包下载
+#   - macOS ARM       (macos-latest)   — Homebrew 安装 (brew install llvm@21)
 #   注：macOS Intel 无 LLVM 21.1.8 预编译包，暂不支持。
+#
+#   macOS 使用 Homebrew 而非 LLVM 预编译包的原因：
+#     LLVM 官方预编译包的静态库含 LLVM 21 bitcode，Xcode 的 Apple ld 无法解析。
+#     Homebrew 编译的 LLVM 与系统工具链兼容。
 #
 # LLVM 预编译包通过 composite action (.github/actions/setup-llvm) 安装并缓存。
 #
@@ -481,7 +485,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Windows x86_64
+          # Windows x86_64 — LLVM 预编译包
           - runner: windows-latest
             llvm_package: "clang+llvm-21.1.8-x86_64-pc-windows-msvc"
             llvm_install: "C:/llvm"
@@ -490,8 +494,9 @@ jobs:
             stub_lib_ext: "lib"
             asset_suffix: "x86_64-windows"
             exe_ext: ".exe"
+            use_brew: false
 
-          # Linux x86_64
+          # Linux x86_64 — LLVM 预编译包
           - runner: ubuntu-latest
             llvm_package: "LLVM-21.1.8-Linux-X64"
             llvm_install: "/opt/llvm"
@@ -500,16 +505,14 @@ jobs:
             stub_lib_ext: "a"
             asset_suffix: "x86_64-linux"
             exe_ext: ""
+            use_brew: false
 
-          # macOS ARM (Apple Silicon)
+          # macOS ARM (Apple Silicon) — Homebrew 安装
           - runner: macos-latest
-            llvm_package: "LLVM-21.1.8-macOS-ARM64"
-            llvm_install: "/opt/llvm"
             llvm_cache_key: "aarch64-macos"
-            extract_tool: "tar"
-            stub_lib_ext: "a"
             asset_suffix: "aarch64-macos"
             exe_ext: ""
+            use_brew: true
 
     steps:
       # 检出对应的代码版本
@@ -522,8 +525,9 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      # 安装 LLVM（使用 composite action，封装下载/缓存/解压/桩库逻辑）
-      - name: Setup LLVM
+      # 安装 LLVM — Windows/Linux 使用 composite action
+      - name: Setup LLVM (prebuilt)
+        if: ${{ !matrix.use_brew }}
         uses: ./.github/actions/setup-llvm
         with:
           llvm-version: ${{ env.LLVM_VERSION }}
@@ -532,6 +536,18 @@ jobs:
           cache-key: ${{ matrix.llvm_cache_key }}
           extract-tool: ${{ matrix.extract_tool }}
           stub-lib-ext: ${{ matrix.stub_lib_ext }}
+
+      # 安装 LLVM — macOS 使用 Homebrew（避免 bitcode 不兼容问题）
+      - name: Setup LLVM (Homebrew)
+        if: ${{ matrix.use_brew }}
+        shell: bash
+        run: |
+          echo "::group::Install LLVM 21 via Homebrew"
+          brew install llvm@21
+          echo "::endgroup::"
+          LLVM_PREFIX="$(brew --prefix llvm@21)"
+          echo "LLVM_SYS_211_PREFIX=${LLVM_PREFIX}" >> "$GITHUB_ENV"
+          echo "::notice::LLVM installed via Homebrew at ${LLVM_PREFIX}"
 
       # 缓存 Cargo 依赖和编译产物
       - name: Cache Cargo
